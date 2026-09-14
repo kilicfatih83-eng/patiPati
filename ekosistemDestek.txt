@@ -1,0 +1,86 @@
+# PROJE EKOSİSTEM DESTEK KILAVUZU VE KOD TAKİP REHBERİ (ekosistemDestek.txt)
+
+**Sürüm:** 1.0 (15.09.2026)
+**Amaç:** Bu doküman, `ekosistemv2.txt` ana referans belgesine tam uyumlu olarak, projenin backend (`server`), veritabanı (`database.sqlite`), frontend uygulamaları (`public-app`, `admin-app`, `bolge-app`) ve dış servisler (`aa/` SMS gateway) arasındaki ilişkiyi, çalışma kurallarını, API endpoint'lerini, subCode mekanizmasını ve güncel durumu dinamik olarak takip etmek üzere oluşturulmuştur.
+
+---
+
+## 1. MİMARİ VE ÇALIŞMA İLKELERİ
+
+### 1.1. Single Responsibility (Sorumlulukların Ayrımı)
+* **Sunucu Yetkilendirmesi:** Yetki kontrolleri (rol, sahiplik, bölge ID'si, hayvan türü yetkisi) yalnızca ve yalnızca sunucuda (`server/server.js`) yapılır.
+* **Frontend Arayüz Serbestliği:** Frontend butonları ve yetki kutucukları (ör. admin ve engelli durumları) client-side gizlenmez veya kilitlenmez. Yetkisiz eylemler sunucu tarafından uygun `subCode` ile reddedilir ve yerel bileşende kullanıcıya duyurulur.
+* **HttpInterceptor Dar Kapsamı:** Interceptor'lar sadece token süresi dolma (`errorCode: 1001`) durumunu yakalayıp oturumu sonlandırır. Diğer tüm hataları component seviyesine bırakır.
+
+### 1.2. Standart Hata ve Başarı Yanıt Yapısı (`subCode` Mimarisi)
+Tüm API yanıtları aşağıdaki JSON yapısını izler:
+```json
+{
+  "message": "<Açıklayıcı Metin>",
+  "errorCode": <Sayı - Genel Kategori>,
+  "subCode": <Sayı - Spesifik Benzersiz Kod>
+}
+```
+
+#### Önemli subCode Kodları Haritası:
+- **`200101`**: Giriş Başarılı (Temizler: `100101` - Oturum süresi doldu)
+- **`200105`**: Bakiye Yüklendi (Temizler: `400101`, `400102`, `400103` - Yetersiz Yayın Hakkı)
+- **`200301`**: İlan Oluşturuldu (Temizler: `400101`)
+- **`200302`**: Başvuru Alındı (Temizler: `400102`)
+- **`200303`**: Mesaj Gönderildi (Temizler: `400103`)
+- **`200501`**: Admin Yöneticiler Güncellendi
+- **`200502`**: Admin Kullanıcı Durumları Güncellendi
+- **`200601`**: Bölge İlan Durumu Güncellendi
+- **`120202`**: Bir admin başka bir adminin bilgilerini değiştiremez
+- **`120203`**: Admin yetkisi doğuştandır, sonradan verilemez veya kaldırılamaz
+- **`120204`**: Admin kullanıcılar engellenemez
+- **`120205`**: Admin kullanıcılar silinemez
+- **`120206`**: Admin kullanıcılar yalnızca kendi şifrelerini güncelleyebilir
+- **`400101` / `400102` / `400103`**: Yetersiz yayın hakkı (İlan / Başvuru / Mesaj)
+- **`400201`**: Kendi ilanına başvuramazsın
+- **`400202`**: Bu ilana daha önce başvurdun
+
+---
+
+## 2. VERİTABANI ŞEMASI (`database.sqlite`)
+
+* `yonTablo`: `id`, `isim`, `sifre` (bcrypt), `telefon`, `mail`, `adm` (1/0), `bolgeId`, `engelli` (1/0), `kus` (1/0), `kedi` (1/0), `kopek` (1/0)
+* `kullaniciTablo`: `id`, `isim`, `sifre` (bcrypt), `telefon` (UNIQUE, 10 hane), `mail`, `yayinHakki` (INTEGER), `engelli` (1/0), `durum` (INTEGER)
+* `bolgeTablo`: `id`, `isim` (TEXT UNIQUE)
+* `ilanTablo`: `id`, `kullaniciId`, `bolgeId`, `hayvanTuru`, `ilanTuru`, `baslik`, `aciklama`, `hayvanIsim`, `telefon`, `durum` (0: Red, 1: Onaylı, 2: Beklemede/Önonaylı), `formVerileri`, `yayinTarihi`, `fotoLink1`, `fotoLink2`, `fotoLink3`
+* `talipTablo`: `id`, `ilanId`, `talipId`, `talipMsj`, `sahipMsj`, `basvuruTarihi`, `durum`
+
+---
+
+## 3. UYGULAMA BİLEŞENLERİ VE SİSTEM İŞLEYİŞİ
+
+1. **`server` (Backend Node.js API):**
+   - Port: `3001`
+   - Tüm rotalar `/api/` önekiyle korunur (legacy `/login` hariç).
+   - Yetkilendirme middleware'leri: `authenticate` (Admin), `authenticateBolge` (Bölge Yöneticisi), `authenticatePublic` (Genel Kullanıcı).
+
+2. **`public-app` (Frontend Genel Kullanıcı - Angular):**
+   - Port: `4200`
+   - Standart standalone bileşenler ve Signals mimarisi.
+   - Global yardım şalteri (`UiStateService`) + `InfoMessageComponent` (`.topWarn` / `?` ikonu).
+   - Akıllı Bildirim Servisi (`NotificationService`) + `NotificationsComponent`.
+   - `yayinHakki` yönetimi: Login yanıtı, Yetersiz Bakiye hatası veya Header "Kontrol Et" butonuyla senkronize edilir.
+
+3. **`admin-app` (Frontend Yönetim Panel - Angular):**
+   - Port: `4201`
+   - Yöneticileri (`yonTablo`) ve Genel Kullanıcıları (`kullaniciTablo`) yönetir.
+   - Sınıf izolasyonu: `.error-message` (kırmızı) ve `.success-message` (yeşil) bileşen bazlı stillendirilir.
+
+4. **`bolge-app` (Frontend Bölge Paneli - Angular):**
+   - Port: `4202`
+   - Sorumlu olunan bölgedeki ilanları ve talepleri yönetir.
+   - Sunucu odaklı otomatik tür filtreleme (Token `kus`, `kedi`, `kopek` yetkileri).
+
+---
+
+## 4. KOD GÜNCELLEME VE TAKİP İLKELERİ
+
+- Bu dosya (`ekosistemDestek.txt`) ve `ekosistemv2.txt`, projenin geçerli mimari rehberleridir.
+- Yapılacak yeni kodlama veya geliştirmelerde eski dağınık `.md` dosyaları yerine bu rehber baz alınır.
+- Kullanıcı açıkça "KOD YAZ" talimatı vermediği sürece kod değiştirilmez, araştırma ve analiz modunda kalınır.
+- Sunucu başlatma/durdurma veya serve etme eylemleri agent tarafından gerçekleştirilmez.
