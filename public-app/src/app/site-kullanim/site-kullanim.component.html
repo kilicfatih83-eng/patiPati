@@ -1,0 +1,53 @@
+<div class="container">
+  <h1>Site Kullanımı, Yayın Hakkı ve SMS Komutları</h1>
+  
+  <hr>
+
+  <h2>Yayın Hakkı (`yayinHakki`) Sistemi Nasıl Çalışır?</h2>
+  <div class="komut">
+    <p>Platformdaki bazı işlemler (yeni ilan vermek, başvuru yapmak, mesajlaşmak) `yayinHakki` olarak adlandırılan bir kota kullanır.</p>
+    <ul>
+      <li>Giriş yaptığınızda, o anki güncel yayın hakkınız yüklenir.</li>
+      <li>Bir işlem yaptığınızda hakkınız düşer ancak bu, sayfanın üst kısmındaki göstergeye <strong>hemen yansımaz</strong>.</li>
+      <li>Göstergede `?` işareti görüyorsanız veya bakiyenizin güncel olmadığını düşünüyorsanız, `Kontrol Et` butonuna basarak sunucudan en güncel bilginizi anında alabilirsiniz.</li>
+      <li>Yetersiz bakiye nedeniyle bir işleminiz başarısız olduğunda da bakiye göstergesi otomatik olarak güncellenir.</li>
+    </ul>
+    <p>Bu sistem, sunucuyu yormadan size esnek bir kullanım sunmak için tasarlanmıştır.</p>
+  </div>
+
+  <hr>
+
+  <h2>SMS Komutları</h2>
+  <p style="color: red; font-weight: bold;">ÖNEMLİ: Türkiye hatları dışından mesaj/kayıt alınmamaktadır (+90 ile başlamayan numaralar desteklenmemektedir).</p>
+
+  <div class="komut">
+    <h3>Yeni Kullanıcı Kaydı</h3>
+    <p>Sisteme ilk kez kaydolmak için kullanılır. Kayıt sonrası başlangıç olarak 5 yayın hakkı (kota) verilir.</p>
+    <p><strong>Format:</strong> <code>KAYIT sizin_sectiginiz_sifre</code></p>
+    <p><strong>Örnek:</strong> <code>KAYIT 12345</code></p>
+  </div>
+
+  <div class="komut">
+    <h3>Şifre Değiştirme</h3>
+    <p>Mevcut şifrenizi değiştirmek için kullanılır.</p>
+    <p><strong>Format:</strong> <code>SIFRE yeni_sifreniz</code></p>
+    <p><strong>Örnek:</strong> <code>SIFRE yenisifrem987</code></p>
+  </div>
+
+  <div class="komut">
+    <h3>Kota Yükleme</h3>
+    <p>Yayın hakkı (kota) yüklemek için iki yöntem vardır:</p>
+    <ol>
+      <li>
+        <strong>Kendinize Kota Yükleme:</strong> Kendi hesabınıza 10 yayın hakkı ekler.
+        <p><strong>Format:</strong> <code>KOTA KOTA</code></p>
+      </li>
+      <li>
+        <strong>Başka Birine Kota Yükleme:</strong> Belirttiğiniz telefon numarasına sahip kullanıcıya 10 yayın hakkı ekler.
+        <p><strong>Format:</strong> <code>KOTA 05xxxxxxxxx</code></p>
+        <p><strong>Örnek:</strong> <code>KOTA 05551234567</code></p>
+      </li>
+    </ol>
+  </div>
+
+</div>

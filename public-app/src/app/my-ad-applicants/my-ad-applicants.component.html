@@ -1,0 +1,63 @@
+<app-info-message messageKey="myAdApplicantsPage" [messageText]="myAdApplicantsInfoMessage"></app-info-message>
+<div class="container">
+    @if (authError()) {
+      <div class="hata-mesaji">{{ authError() }}</div>
+    } @else {
+      @if (bilgiMesaji(); as message) {
+        <div [class]="'bilgi-mesaji ' + message.type">
+          {{ message.text }}
+        </div>
+      }
+      <h1>İlanlarıma Gelen Başvurular</h1>
+      @if (isLoading()) {
+        <p>Yükleniyor...</p>
+      } @else {
+        @if (applicants().length > 0) {
+          <div class="applicants-list">
+            @for (applicant of applicants(); track applicant.id) {
+              <div class="applicant-card" [class.rejected]="applicant.durum === 0">
+                <div class="card-shell">
+                    <div class="ids">
+                        <p><strong>Talep ID:</strong> {{ applicant.id }}</p>
+                        <p><strong>İlan ID:</strong> <a (click)="searchForIlan(applicant.ilanId)" class="ilan-id-link">{{ applicant.ilanId }}</a></p>
+                    </div>
+                    <h3>İlan: {{ applicant.ilanBaslik }}</h3>
+                    <p><strong>Talip ID:</strong> {{ applicant.talipId }}</p>
+                    <p class="durum">Durum: {{ getDurumText(applicant.durum) }}</p>
+                    <p class="date">Başvuru Tarihi: {{ applicant.basvuruTarihi | date:'short' }}</p>
+                    <button (click)="toggleDetails(applicant)">{{ openCardId() === applicant.id ? 'Detayları Gizle' : 'Detayları Gör' }}</button>
+                </div>
+
+                @if (openCardId() === applicant.id) {
+                  <div class="card-details">
+                    @if(detailsLoading()){
+                      <p>Detaylar yükleniyor...</p>
+                    }
+                    @if(selectedApplicantDetail(); as details){
+                        <div class="messages">
+                          @if(details.talipMsj) {
+                            <p><strong>Başvuranın Mesajı:</strong> {{ details.talipMsj }}</p>
+                          } @else {
+                            <p><strong>Başvuranın Mesajı:</strong> Bu başvuru onaylanmadığı için mesaj içeriği gizlenmiştir.</p>
+                          }
+                          <p><strong>Yanıtınız:</strong> {{ details.sahipMsj || 'Henüz yanıtlanmadı.' }}</p>
+                        </div>
+                        @if (applicant.durum !== 0) {
+                          <div class="reply-section">
+                            <textarea [(ngModel)]="replyMessage" rows="3" placeholder="Yanıtınızı yazın (en fazla 70 karakter)..." maxlength="70"></textarea>
+                            <button (click)="sendReply(details.id)">Yanıtla/Güncelle</button>
+                          </div>
+                        }
+
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        } @else {
+          <p>Henüz ilanlarınıza başvuran yok.</p>
+        }
+      }
+    }
+</div>

@@ -1,0 +1,4 @@
+main, router-outlet {
+  display: block; /* ensure router-outlet is a block container */
+  padding-top: 70px; /* Height of the fixed header + some extra space */
+}

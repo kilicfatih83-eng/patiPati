@@ -1,0 +1,58 @@
+<app-info-message messageKey="myApplicationsPage" [messageText]="myApplicationsInfoMessage"></app-info-message>
+<div class="container">
+    @if (authError()) {
+      <div class="hata-mesaji">{{ authError() }}</div>
+    } @else {
+      @if (bilgiMesaji(); as message) {
+        <div [class]="'bilgi-mesaji ' + message.type">
+          {{ message.text }}
+        </div>
+      }
+      <h1>Başvurularım</h1>
+      @if (isLoading()) {
+        <p>Yükleniyor...</p>
+      } @else {
+        @if (applications().length > 0) {
+          <div class="applications-list">
+            @for (app of applications(); track app.id) {
+              <div class="application-card" [class.rejected]="app.durum === 0">
+                <div class="card-shell">
+                  <p class="ids"><strong>Talep ID:</strong> {{ app.id }}</p>
+                  <h3><a (click)="viewIlanDetails(app)" style="cursor: pointer; text-decoration: underline;">{{ app.ilanBaslik || 'İlan Başlığı Yok' }}</a></h3>
+                  <p class="durum">Durum: {{ getDurumText(app.durum) }}</p>
+                  <p class="date">Başvuru Tarihi: {{ app.basvuruTarihi | date:'short' }}</p>
+                  <button (click)="toggleDetails(app)">{{ openCardId() === app.id ? 'Detayları Gizle' : 'Detayları Gör' }}</button>
+                </div>
+
+                @if (openCardId() === app.id) {
+                  <div class="card-details">
+                    @if(detailsLoading()){
+                      <p>Detaylar yükleniyor...</p>
+                    }
+                    @if(selectedApplicationDetail(); as details){
+                          <div class="messages">
+                              @if(details.talipMsj) {
+                                  <p><strong>Benim Mesajım:</strong> {{ details.talipMsj }}</p>
+                              } @else {
+                                  <p><strong>Benim Mesajım:</strong> Bu başvuru onaylanmadığı için mesaj içeriği gizlenmiştir.</p>
+                              }
+                              <p><strong>İlan Sahibi Yanıtı:</strong> {{ details.sahipMsj || 'Henüz yanıt yok.' }}</p>
+                          </div>
+                           @if (app.durum !== 0) {
+                          <div class="reply-section">
+                              <textarea [(ngModel)]="replyMessage" rows="3" placeholder="Mesajınızı güncelleyin (en fazla 70 karakter)..." maxlength="70"></textarea>
+                              <button (click)="sendReply(details.id)">Güncelle</button>
+                          </div>
+                          }
+                    }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        } @else {
+          <p>Henüz hiç başvuru yapmadınız.</p>
+        }
+      }
+    }
+</div>

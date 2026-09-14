@@ -1,0 +1,24 @@
+<header>
+  <nav>
+    <div class="left-nav">
+      <a [routerLink]="['/']" class="app-title">Bölge Yönetim Paneli</a>
+    </div>
+
+    <div class="center-nav">
+      @if (currentUser(); as user) {
+        <span class="user-status">Giriş yapıldı</span>
+      } @else {
+        <span class="user-status">Giriş yapın</span>
+      }
+    </div>
+
+    <div class="right-nav">
+        @if (currentUser()) {
+          <a [routerLink]="['/ilanlar']">İlanlar</a>
+          <a [routerLink]="['/talipler']">Talipler</a>
+        }
+        <button (click)="login()">Giriş Yap</button>
+        <button (click)="logout()">Çıkış Yap</button>
+    </div>
+  </nav>
+</header>

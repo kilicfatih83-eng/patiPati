@@ -1,0 +1,46 @@
+<app-info-message messageKey="vitrinPage" [messageText]="vitrinInfoMessage"></app-info-message>
+
+<div class="vitrin-container">
+  @if (bilgiMesaji(); as message) {
+    <div [class]="'bilgi-mesaji ' + message.type">
+      {{ message.text }}
+    </div>
+  }
+  <div class="filters">
+    <div class="filter-group">
+      <select [(ngModel)]="selectedBolge">
+        <option value="">Tüm Bölgeler</option>
+      @for(bolge of bolgeler(); track bolge.id){
+        <option [value]="bolge.id">{{ bolge.isim }}</option>
+      }
+    </select>
+
+    <select [(ngModel)]="selectedTur">
+      <option value="">Tüm Türler</option>
+      @for(tur of hayvanTurleri(); track tur){
+        <option [value]="tur">{{ tur }}</option>
+      }
+    </select>
+
+    <button (click)="applyFilters()">Filtrele</button>
+    </div>
+    <div class="search-group">
+        <input type="text" [(ngModel)]="ilanIdSearch" placeholder="İlan ID ile Ara..." />
+        <button (click)="searchIlanById()">Ara</button>
+    </div>
+  </div>
+
+  <div class="ilan-grid">
+@for(ilan of ilanlar(); track ilan.id){
+      <div class="ilan-card" (click)="viewDetails(ilan)">
+        <img [src]="ilan.fotoLink1 || 'https://via.placeholder.com/150'" alt="Hayvan Fotoğrafı">
+        <div class="ilan-card-body">
+          <h3>{{ ilan.baslik }}</h3>
+          <p>{{ ilan.hayvanIsim }}</p>
+        </div>
+      </div>
+    } @empty {
+      <p>Gösterilecek ilan bulunamadı.</p>
+    }
+  </div>
+</div>

@@ -1,0 +1,88 @@
+<app-info-message messageKey="ilanDetayPage" [messageText]="ilanDetayInfoMessage"></app-info-message>
+
+<div class="ilan-detay-container">
+  <button (click)="goBack()" class="close-button top-close">X</button>
+
+  @if (isLoading()) {
+    <p>İlan yükleniyor...</p>
+  } @else if (error()) {
+    <div class="hata-mesaji">{{ error() }}</div>
+  } @else if (ilan(); as currentIlan) {
+    @if (currentIlan.fotoLink1) {
+      <div class="gallery">
+        <div class="main-image">
+          <img [src]="currentIlan.fotoLink1" alt="Ana Fotoğraf" (click)="openImageModal(currentIlan.fotoLink1)" style="cursor: pointer;">
+        </div>
+        <div class="thumbnails">
+          @if(currentIlan.fotoLink2){
+            <img [src]="currentIlan.fotoLink2" alt="Foto 2" (click)="openImageModal(currentIlan.fotoLink2)">
+          }
+          @if(currentIlan.fotoLink3){
+            <img [src]="currentIlan.fotoLink3" alt="Foto 3" (click)="openImageModal(currentIlan.fotoLink3)">
+          }
+        </div>
+      </div>
+    }
+    <div class="details">
+      <h1>{{ currentIlan.baslik }}</h1>
+      <h2>{{ currentIlan.hayvanIsim }}</h2>
+      <p class="ilan-id-display"><strong>İlan ID:</strong> {{ currentIlan.id }}</p>
+
+      @if(currentIlan.durum !== 1){
+        <div class="onay-bekliyor-mesaji">
+          <p>Bu ilan henüz onaylanmamıştır veya reddedilmiştir. Onaylandığında tüm detaylar ve fotoğraflar burada görünecektir.</p>
+        </div>
+      }
+
+      @if(currentIlan.aciklama){
+        <p class="aciklama">{{ currentIlan.aciklama }}</p>
+      }
+      
+      <div class="info-grid">
+        @if(currentIlan.ilanTuru){
+          <div class="info-item">
+            <strong>İlan Türü:</strong> {{ currentIlan.ilanTuru }}
+          </div>
+        }
+        <div class="info-item">
+          <strong>Hayvan Türü:</strong> {{ currentIlan.hayvanTuru }}
+        </div>
+        <div class="info-item">
+          <strong>Yayın Tarihi:</strong> {{ currentIlan.yayinTarihi | date: 'dd/MM/yyyy' }}
+        </div>
+      </div>
+
+      @if(formVerileri().length > 0){
+        <div class="info-grid">
+          <h3>Ek Detaylar</h3>
+          @for(item of formVerileri(); track item.key){
+            <div class="info-item">
+              <strong>{{ item.key }}:</strong> {{ item.value }}
+            </div>
+          }
+        </div>
+      } @else if(currentIlan.durum !== 1) {
+         <p>İlan onaylı olmadığı için ek detaylar gizlenmiştir.</p>
+      }
+
+      <div class="action-buttons">
+        @if (isOwner()) {
+          <span class="owner-ad-badge" style="color: #666; font-style: italic; padding: 6px 12px; background: #eee; border-radius: 4px;">Kendi ilanınıza cevap yazamazsınız/başvuramazsınız.</span>
+        } @else {
+          <button (click)="goToTalipOl()" class="talip-ol-button">Talip Ol</button>
+        }
+        <button (click)="share()" class="share-button">Paylaş</button>
+      </div>
+    </div>
+  }
+  <button (click)="goBack()" class="close-button bottom-close">Geri Dön</button>
+</div>
+
+@if (isModalOpen()) {
+  <div class="image-modal-overlay" (click)="closeImageModal()">
+    <span class="close-modal-btn">&times;</span>
+    <img [src]="modalImageUrl()" alt="Büyük Boy Fotoğraf" class="modal-content">
+  </div>
+}
+
+

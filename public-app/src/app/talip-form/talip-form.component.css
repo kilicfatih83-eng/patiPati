@@ -1,0 +1,9 @@
+.topWarn {
+  background-color: #fff0f0;
+  color: #c00;
+  border: 1px solid #c00;
+  padding: 15px;
+  margin: 20px;
+  border-radius: 5px;
+  text-align: center;
+}

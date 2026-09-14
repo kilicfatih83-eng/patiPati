@@ -1,0 +1,12 @@
+<ng-container *ngIf="uiStateService.showInfoMessages()">
+  <div *ngIf="!isDismissed(); else miniIcon" class="topWarn">
+    <span>{{ messageText }}</span>
+    <button class="close-btn" (click)="dismiss()" title="Bu uyarıyı gizle">X</button>
+  </div>
+</ng-container>
+
+<ng-template #miniIcon>
+  <div class="mini-warn-icon" (click)="unDismiss()" title="Yardım metnini tekrar göster">
+    <span>?</span>
+  </div>
+</ng-template>

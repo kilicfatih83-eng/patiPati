@@ -1,0 +1,30 @@
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+}
+
+.main-header nav a {
+  margin-right: 1rem;
+  text-decoration: none;
+  color: #007bff;
+  font-weight: 500;
+}
+
+.user-actions {
+  display: flex;
+  align-items: center;
+}
+
+.user-actions .username {
+  margin-right: 1rem;
+  font-weight: bold;
+}
+
+.user-actions a {
+  cursor: pointer;
+  color: #007bff;
+}

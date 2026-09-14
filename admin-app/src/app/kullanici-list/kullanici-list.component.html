@@ -1,0 +1,103 @@
+<div class="container">
+  <h1>Kullanıcılar</h1>
+
+  @if(error()) {
+    <div class="error-message">{{ error() }}</div>
+  }
+  @if(success()) {
+    <div class="success-message">{{ success() }}</div>
+  }
+
+  <div class="controls">
+    <button (click)="getKullanicilar()">Kullanıcıları Getir</button>
+    <button (click)="saveChanges()" class="primary" [disabled]="isLoading()">Değişiklikleri Kaydet</button>
+  </div>
+
+  <div class="filter-controls">
+    <small>Filtrele:</small>
+    <div class="checkbox-group">
+      @for(opt of statusOptions; track opt.id){
+        <label>
+          <input 
+            type="checkbox" 
+            [checked]="filterSelection().has(opt.id)"
+            (change)="toggleFilterSelection(opt.id)">
+          {{opt.id}}-{{opt.text}}
+        </label>
+      }
+    </div>
+  </div>
+
+
+  @if (kullanicilar().length > 0) {
+    <div class="bulk-actions">
+      <div class="selection-summary">
+        <span>{{ selectedCount() }} kullanıcı seçildi</span>
+      </div>
+
+      <div class="update-selector">
+        <small>Seçilenlere uygula (ilk seçilen durum uygulanır):</small>
+        <div class="checkbox-group">
+          @for(opt of statusOptions; track opt.id){
+            <label>
+              <input 
+                type="checkbox" 
+                [checked]="updateStatusSelection.includes(opt.id)"
+                (change)="toggleUpdateStatusSelection(opt.id)">
+              {{opt.id}}-{{opt.text}}
+            </label>
+          }
+        </div>
+        <button 
+          (click)="applyStatusUpdate()" 
+          [disabled]="selectedCount() === 0 || updateStatusSelection.length === 0">
+          Uygula
+        </button>
+      </div>
+    </div>
+  }
+
+  @if(isLoading()) {
+    <p>Yükleniyor...</p>
+  }
+
+  <div class="table-container">
+    <table>
+      <thead>
+        <tr>
+          <th>
+            <input 
+              type="checkbox" 
+              [checked]="isAllSelected()" 
+              (change)="toggleSelectAll()"
+              title="Tümünü Seç/Bırak">
+          </th>
+          <th>İsim</th>
+          <th>Telefon</th>
+          <th>Mail</th>
+          <th>Yayın Hakkı</th>
+          <th>Durum</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (user of kullanicilar(); track user.id) {
+          <tr>
+            <td>
+              <input 
+                type="checkbox" 
+                [checked]="isSelected(user.id)" 
+                (change)="toggleSelection(user.id)">
+            </td>
+            <td>{{ user.isim }}</td>
+            <td>{{ user.telefon }}</td>
+            <td>{{ user.mail }}</td>
+            <td>{{ user.yayinHakki }}</td>
+            <td>
+              <span class="status-badge status-{{user.durum}}">{{ getDurumText(user.durum) }}</span>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

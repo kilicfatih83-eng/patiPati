@@ -1,0 +1,234 @@
+# Proje Ekosistemi v2 (Nihai ve Kapsamlı Referans Belgesi)
+
+**Sürüm Notu:** Bu doküman, proje dizinindeki tüm eski mimari, planlama ve durum raporu `.md` dosyalarını (`28-08-dosyasi.md` dahil) analiz ederek, çelişkileri en güncel plana göre çözerek ve kodun mevcut durumunu referans alarak oluşturulmuştur. Bu dosya, projenin **tek ve merkezi doğruluk kaynağıdır** ve diğer tüm `.md` dosyalarını geçersiz kılar.
+
+---
+
+## 1. Felsefe ve Değişmez Kurallar
+
+Uygulanan ve uygulanacak olan tüm kodlar, istisnasız olarak aşağıdaki mimari prensiplere dayanır:
+
+### 1.1. Hata Yönetim Mimarisi (subCode Odaklı)
+
+Sunucudan dönen tüm hatalar, frontend tarafında tahmin yürütmeye yer bırakmayacak şekilde, son derece net ve standart bir yapıda olmalıdır:
+
+1.  **HTTP Durum Kodu:** `400`, `401`, `403`, `404`, `409`, `419` gibi standart HTTP kodları hatanın genel kategorisini belirtir.
+2.  **JSON Gövdesi:** Hatanın detayı, her zaman aşağıdaki formatta bir JSON nesnesi ile iletilir:
+    ```json
+    {
+      "message": "<Kullanıcıya gösterilecek veya loglanacak açıklayıcı metin>",
+      "errorCode": "<SAYI - Genel Hata Kategorisi, örn: 1203>",
+      "subCode": "<SAYI - Spesifik, Benzersiz Hata Kodu, örn: 120305>"
+    }
+    ```
+3.  **`subCode` (Mimarinin Temeli):** Her bir spesifik hata durumu (örn: "Kullanıcı kendi ilanına başvuramaz") için **benzersizdir**. Frontend, `switch (error.error.subCode)` gibi yapılarla, hatanın *tam olarak ne olduğunu* anlayıp ona göre spesifik ve akıllı aksiyonlar alır (sadece mesaj gösterme, bir kartı kapatma, başka sayfaya yönlendirme vb.).
+
+### 1.2. Sorumlulukların Katı Ayrımı (Single Responsibility)
+
+*   **Interceptor'lar:** Frontend'deki `HttpInterceptor`'ların tek bir görevi vardır: `errorCode: 1001` (Token Süresi Doldu) hatasını yakalayıp kullanıcı oturumunu sessizce sonlandırmak (`authService.logout()`). Diğer tüm hataları, işlenmek üzere isteği yapan component'e dokunmadan paslar.
+*   **API Çağrısı Yapan Component'ler:** Bir API isteği yapan component (örn: `ilan-detay`), bu isteğin sonucundan (başarı veya hata) tek başına sorumludur. Hata, component içinde lokal sinyallerle (`error.set(...)`) yönetilir ve kullanıcıya en yakın noktada gösterilir. Asla global, tüm siteyi etkileyen bir hata mesajı gösterilmez.
+*   **Yetkilendirme (Sunucu Odaklı):** Yetki kontrolleri (rol, sahiplik, bölge ID'si eşleşmesi vb.) **sadece ve sadece sunucu tarafında (`server.js`)** yapılır. Frontend, butonları veya linkleri gizlemek için `jwt-decode` gibi istemci taraflı bir mekanizma **kullanmaz**. Butonlar ve arayüz elemanları daima aktiftir; yetkisiz bir istek sunucu tarafından uygun `subCode` ile reddedilir ve bu hata, isteği yapan component içinde kullanıcıya bildirilir.
+
+### 1.3. Veri Bütünlüğü ve Hata Durumunda Arayüz Davranışı
+
+*   Özellikle toplu işlemlerde (`bolge-app` ilan onayı gibi), sunucudan bir hata (`failures` dizisi) döndüğünde kullanıcının arayüzde yaptığı değişiklikler kaybolmaz. Başarısız olan kayıtlar, kullanıcıya net bir şekilde bildirmek amacıyla, sadece görsel olarak (arka plan rengi vb.) `failedIds` sinyali aracılığıyla işaretlenir.
+
+---
+
+## 2. Proje Bileşenleri ve Teknoloji Yığını
+
+-   **`server` (Backend):** Saf Node.js `http` modülü ile yazılmış, tüm iş mantığını, veritabanı operasyonlarını ve yetkilendirmeyi yürüten merkezi API sunucusu.
+    -   **Teknoloji:** Node.js, `sqlite3`, `jsonwebtoken`, `bcrypt`.
+    -   **Prensip:** NestJS gibi büyük çatılar (framework) **kullanılmaz**. Mümkün olduğunca basit ve standart Node.js modülleri üzerine kuruludur.
+-   **`public-app` (Frontend):** Genel kullanıcıların (ilan veren, başvuran) kullandığı ana web uygulaması.
+    -   **Teknoloji:** Angular (Standalone Components & Signals).
+-   **`admin-app` (Frontend):** Sistem yöneticilerinin (`adm`) diğer yönetici kullanıcıları, genel kullanıcıları ve sistem ayarlarını yönettiği arayüz.
+    -   **Teknoloji:** Angular.
+-   **`bolge-app` (Frontend):** Bölge yöneticilerinin (`bolge`) kendi sorumluluk alanlarındaki ilanları ve başvuruları yönettiği arayüz.
+    -   **Teknoloji:** Angular.
+-   **SMS Gateway (Harici):** `aa/` klasöründe tanımlanan, gelen SMS'leri yakalayıp backend API'sine (`/api/sms-handler`) JSON formatında ileten üçüncü parti bir Android uygulaması.
+
+---
+
+## 3. Detaylı Veritabanı Mimarisi (`database.sqlite`)
+
+Veritabanı, `PRAGMA journal_mode = WAL;` ve `PRAGMA synchronous = NORMAL;` optimizasyonları ile çalışır. Tablo yapıları aşağıdaki gibidir:
+
+1.  **`yonTablo`**: Yönetici kullanıcıları tutar.
+    *   `id`: INTEGER PRIMARY KEY
+    *   `isim`, `sifre`, `telefon`, `mail`: TEXT
+    *   `adm`: INTEGER (1: Süper Admin, 0: Bölge Yöneticisi)
+    *   `bolgeId`: INTEGER (Bölge yöneticisinin sorumlu olduğu bölgenin ID'si, `bolgeTablo.id`'ye karşılık gelir)
+    *   `engelli`: INTEGER (1: Hesap engelli, 0: Hesap aktif)
+
+2.  **`kullaniciTablo`**: Genel (public) kullanıcıları tutar.
+    *   `id`: INTEGER PRIMARY KEY
+    *   `isim`: TEXT (Genellikle kullanıcının adı veya rumuzu)
+    *   `sifre`: TEXT (bcrypt ile hash'lenmiş parola)
+    *   `telefon`: TEXT UNIQUE (Normalize edilmiş, 10 haneli telefon numarası. Sisteme giriş için kullanıcı adı olarak kullanılır)
+    *   `mail`: TEXT (Opsiyonel)
+    *   `yayinHakki`: INTEGER (Kullanıcının kalan işlem hakkı)
+    *   `engelli`: INTEGER (1: Hesap engelli, 0: Hesap aktif)
+
+3.  **`bolgeTablo`**: Coğrafi bölgeleri (şehirler) tanımlar.
+    *   `id`: INTEGER PRIMARY KEY
+    *   `isim`: TEXT UNIQUE
+
+4.  **`ilanTablo`**: Hayvan ilanlarının tüm verilerini tutar.
+    *   `id`: INTEGER PRIMARY KEY
+    *   `kullaniciId`: INTEGER (`kullaniciTablo.id`'ye FOREIGN KEY)
+    *   `bolgeId`: INTEGER (`bolgeTablo.id`'ye FOREIGN KEY)
+    *   `hayvanTuru`, `ilanTuru`, `baslik`, `aciklama`, `hayvanIsim`, `telefon`: TEXT
+    *   `durum`: INTEGER (0: Reddedildi, 1: Onaylandı, 2: İşlemsiz/Beklemede vb. Durum kodları `bolge-app` içinde tanımlıdır)
+    *   `formVerileri`: TEXT (İlana özel "Cins", "Yaş" gibi ek alanlar için JSON formatında string)
+    *   `yayinTarihi`: DATETIME
+    *   `fotoLink1`, `fotoLink2`, `fotoLink3`: TEXT
+
+5.  **`talipTablo`**: İlanlara yapılan başvuruları (talipleri) tutar.
+    *   `id`: INTEGER PRIMARY KEY
+    *   `ilanId`: INTEGER (`ilanTablo.id`'ye FOREIGN KEY)
+    *   `talipId`: INTEGER (`kullaniciTablo.id`'ye FOREIGN KEY)
+    *   `talipMsj`: TEXT (Başvuranın mesajı)
+    *   `sahipMsj`: TEXT (İlan sahibinin cevabı)
+    *   `basvuruTarihi`: DATETIME
+    *   `durum`: INTEGER (Başvuru durumu, `bolge-app` içinde tanımlıdır)
+
+
+---
+
+## 4. Kapsamlı Backend API Mimarisi (`server.js`)
+
+Tüm API yolları (legacy `login` hariç) `/api` öneki ile başlar ve ilgili `authenticate*` middleware'i ile korunur.
+
+### 4.1. Admin ve Kullanıcı Yönetimi (`admin-app`)
+-   `POST /login`
+    - **Açıklama:** Yönetici (Admin veya Bölge) girişi. (Legacy endpoint, `/api` öneki yok).
+    - **Yetki:** Yok.
+    - **Dönen Cevap:** `{ message, user, token }`
+-   `GET /api/yoneticiler`
+    - **Açıklama:** Tüm yönetici kullanıcıları listeler.
+    - **Yetki:** Admin.
+-   `POST /api/yoneticiler/kaydet`
+    - **Açıklama:** Yönetici ekleme, güncelleme ve silme işlemlerini toplu halde yapar.
+    - **Yetki:** Admin.
+    - **Body:** `{ updates: [], inserts: [], deletes: [] }`
+-   `GET /api/kullanicilar`
+    - **Açıklama:** Tüm genel kullanıcıları (`kullaniciTablo`) listeler.
+    - **Yetki:** Admin.
+-   `POST /api/kullanicilar/update-status`
+    - **Açıklama:** Genel kullanıcıların durumunu (engelli/aktif) toplu günceller.
+    - **Yetki:** Admin.
+    - **Body:** `{ updates: [{ id, engelli }] }`
+-   `POST /api/kullanicilar/register`
+    - **Açıklama:** Admin tarafından yeni bir genel kullanıcı kaydı oluşturur.
+    - **Yetki:** Admin.
+    - **Body:** `{ isim, sifre, telefon, mail }`
+
+### 4.2. Bölge Yönetimi (`bolge-app`)
+-   `GET /api/bolge/ilanlar`
+    - **Açıklama:** Yöneticinin kendi bölgesindeki ilanları, durum, tür ve sayfa filtreleriyle listeler.
+    - **Yetki:** Bölge.
+-   `POST /api/bolge/ilan-durum-guncelle`
+    - **Açıklama:** Bir veya daha fazla ilanın durumunu toplu günceller.
+    - **Yetki:** Bölge.
+-   `GET /api/bolge/ilan-detay/:id`
+    - **Açıklama:** Yöneticinin **kendi bölgesindeki** tek bir ilanın tüm detaylarını getirir.
+    - **Yetki:** Bölge.
+
+### 4.3. Genel Kullanıcı İşlemleri (`public-app`)
+-   `POST /api/public/login`
+    - **Açıklama:** Genel kullanıcı girişi. Cevapta `yayinHakki` bilgisini de döndürür.
+    - **Yetki:** Yok.
+-   `GET /api/bolgeler`
+    - **Açıklama:** Tüm bölgeleri listeler.
+    - **Yetki:** Yok (veya Public).
+-   `GET /api/ilanlar`
+    - **Açıklama:** Vitrinde gösterilecek, sadece onaylanmış (`durum: 1`) ilanları listeler.
+    - **Yetki:** Yok (veya Public).
+-   `POST /api/ilanlar`
+    - **Açıklama:** Yeni bir ilan oluşturur. Başarılı olursa `yayinHakki` düşer.
+    - **Yetki:** Public.
+-   `GET /api/ilan-detay-full/:id`
+    - **Açıklama:** Herkese açık, onaylanmış tek bir ilanın tüm detaylarını getirir.
+    - **Yetki:** Public.
+-   `GET /api/ilan-detay-kisitli/:id`
+    - **Açıklama:** Onaylanmamış (red, beklemede vb.) bir ilanın kısıtlı (`formVerileri`, `fotoLink`ler hariç) detaylarını getirir.
+    - **Yetki:** Public.
+
+
+-   `GET /api/my-ads`
+    - **Açıklama:** Giriş yapmış kullanıcının kendi ilanlarını listeler.
+    - **Yetki:** Public.
+-   `GET /api/my-ad-detay-full/:id`
+    - **Açıklama:** Giriş yapmış kullanıcının **onaylı** bir ilanının tüm detaylarını getirir. Sahiplik kontrolü yapar.
+    - **Yetki:** Public.
+-   `GET /api/my-ad-detay-kisitli/:id`
+    - **Açıklama:** Giriş yapmış kullanıcının **onaylı olmayan** bir ilanının kısıtlı detaylarını getirir. Sahiplik kontrolü yapar.
+    - **Yetki:** Public.
+-   `GET /api/my-applications`
+    - **Açıklama:** Giriş yapmış kullanıcının yaptığı başvuruları listeler.
+    - **Yetki:** Public.
+-   `GET /api/my-ads-applicants`
+    - **Açıklama:** Giriş yapmış kullanıcının ilanlarına gelen başvuruları listeler. Cevapta `ilanDurum` bilgisi de bulunur.
+    - **Yetki:** Public.
+-   `GET /api/talep-detay-full/:id`
+    - **Açıklama:** Onaylı bir başvurunun tam detayını (mesajlar dahil) getirir. Talip veya ilan sahibi olma kontrolü yapar.
+    - **Yetki:** Public.
+-   `GET /api/talep-detay-kisitli/:id`
+    - **Açıklama:** Onaylı olmayan bir başvurunun kısıtlı detayını getirir.
+    - **Yetki:** Public.
+-   `GET /api/me/yayin-hakki`
+    - **Açıklama:** Sadece giriş yapmış kullanıcının güncel `yayinHakki` bilgisini döndürür.
+    - **Yetki:** Public.
+-   `POST /api/ilanlar/:id/talip-ol`
+    - **Açıklama:** Bir ilana başvuru yapar. `yayinHakki` düşer.
+    - **Yetki:** Public.
+-   `POST /api/mesaj`
+    - **Açıklama:** Başvuru üzerinden mesaj gönderir/yanıtlar. `yayinHakki` düşer.
+    - **Yetki:** Public.
+
+### 4.4. Harici Servisler
+-   `POST /api/sms-handler`
+    - **Açıklama:** SMS Gateway uygulamasından gelen SMS komutlarını (`KAYIT`, `SIFRE`, `KOTA`) işler.
+    - **Yetki:** `X-Secret-Key` başlığı ile.
+
+---
+
+## 5. Frontend Mimarisi ve Anahtar İş Akışları
+
+### 5.1. `yayinHakki` Yönetimi (Radikal Basitleştirilmiş Model)
+
+`yayinHakki` verisi sunucu tarafından proaktif olarak **gönderilmez**. Bakiye, tamamen frontend `AuthService` içinde yönetilir ve yalnızca 3 net eylemle güncellenir:
+1.  **Login İşlemi:** `POST /api/public/login` fonksiyonu, başarılı girişte kullanıcı bilgileriyle birlikte `yayinHakki` döndürür. `AuthService` bu değeri alır ve saklar.
+2.  **Yetersiz Bakiye Hatası:** `createIlan` gibi bir işlem, `subCode: 400101` ile başarısız olduğunda, hata yanıtıyla birlikte gelen `guncelYayinHakki` değeri ile `AuthService`'deki bakiye senkronize edilir.
+3.  **Manuel Sorgulama:** Header'daki "Kontrol Et" butonu, `GET /api/me/yayin-hakki` endpoint'ini çağırır ve dönen `{ yayinHakki: X }` cevabıyla `AuthService`'deki bakiyeyi günceller.
+
+### 5.2. İlan Detayı Görüntüleme Akışı (`ilan-detay.component.ts`)
+
+Component, hangi API'yi çağıracağına `ngOnInit` içinde karar verir:
+1.  **Sayfa Yenileme Kontrolü:** Önce `router.state`'ten, eğer orada yoksa `IlanStateService`'ten ilanın `durum` ve `isOwnerView` bilgisi alınır.
+2.  **Sahip Görünümü (`isOwnerView: true`):**
+    *   Eğer `durum === 1` (Onaylı) ise: `apiService.getMyAdDetayFull(id)` çağrılır.
+    *   Eğer `durum !== 1` (Onaylı Değil) ise: `apiService.getMyAdDetayKisitli(id)` çağrılır.
+3.  **Ziyaretçi Görünümü (`isOwnerView: false`):**
+    *   Her zaman `apiService.getIlanDetayFull(id)` çağrılır (Bu endpoint zaten sadece `durum=1` olanları döndürür).
+
+### 5.3. Başvuru Detayı Görüntüleme Akışı (`my-ad-applicants.component.ts`)
+
+1.  Kullanıcı, ilanına gelen bir başvuruya tıklar.
+2.  Component, `getDetails` fonksiyonunu tetikler.
+3.  `isGettable` değişkeni, başvurunun ait olduğu **ilanın durumuna** (`app.ilanDurum`) göre belirlenir.
+4.  Eğer ilan onaylı ise (`app.ilanDurum === 1`), `apiService.getTalepDetayFull(id)` çağrılır.
+5.  Eğer ilan onaylı değilse, `apiService.getTalepDetayKisitli(id)` çağrılır.
+6.  Gelen hata `subCode`'a göre işlenir ve istenmeyen `logout` çağrısı **yapılmaz**.
+
+### 5.4. Dış Sistem Entegrasyonu: SMS Komut İşleyici
+
+-   **Amaç:** Kullanıcıların SMS göndererek sisteme kayıt olmasını, şifre değiştirmesini vb. sağlamak.
+-   **Akış:**
+    1.  Kullanıcı SMS'i gönderir.
+    2.  Telefondaki **SMS Yönlendirici Android Uygulaması** SMS'i yakalar.
+    3.  Uygulama, metni ayrıştırır ve bir JSON objesine çevirir.
+    4.  Bu JSON'u `POST` metoduyla backend'deki `/api/sms-handler` endpoint'ine, `X-Secret-Key` başlığı ile gönderir.
+    5.  Backend bu isteği alır, doğrular ve ilgili komutu veritabanında işler.
+

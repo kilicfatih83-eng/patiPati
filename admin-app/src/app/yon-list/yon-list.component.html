@@ -1,0 +1,104 @@
+<div class="yon-list-container">
+  <h1>Yönetici Listesi</h1>
+  @if(error()) {
+    <div class="error-message">{{ error() }}</div>
+  }
+  @if(success()) {
+    <div class="success-message">{{ success() }}</div>
+  }
+  <div class="toolbar">
+    <button (click)="getir()">Getir</button>
+      <button (click)="yeniSatirEkle()">Yeni Satır Ekle</button>
+      <button (click)="kaydet()">Kaydet</button>
+  </div>
+    <div class="toolbar sub-toolbar">
+      <button (click)="getBolgeler()">Bölgeleri Getir</button>
+      <select>
+        <option value="">Görüntülemek için bölge seçin</option>
+        @for (bolge of bolgeler(); track bolge.id) {
+          <option [value]="bolge.id">{{ bolge.id }} - {{ bolge.isim }}</option>
+        }
+      </select>
+    </div>
+
+  @if (displayYoneticiList().length > 0) {
+<table>
+      <thead>
+        <tr>
+          <th><input type="checkbox" (change)="toggleSelectAll($event)"></th>
+          <th>ID</th>
+          <th>İsim</th>
+          <th>Şifre (Yeni)</th>
+          <th>Telefon</th>
+          <th>Mail</th>
+          <th>Kuş</th>
+          <th>Kedi</th>
+          <th>Köpek</th>
+          <th>Admin</th>
+          <th>Bölge ID</th>
+          <th>Engelli</th>
+          <th>İşlemler</th>
+        </tr>
+      </thead>
+<tbody>
+        @for (yonetici of displayYoneticiList(); track yonetici.id) {
+          <tr>
+            <td><input type="checkbox" [(ngModel)]="yonetici.selected" (ngModelChange)="onRowSelect()"></td>
+            <td>{{ yonetici.id }}</td>
+            <td><input [(ngModel)]="yonetici.isim" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="password" [(ngModel)]="yonetici.sifre" (ngModelChange)="handleModelChange(yonetici.id)" placeholder="Değiştirmek için yazın"></td>
+            <td><input [(ngModel)]="yonetici.telefon" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input [(ngModel)]="yonetici.mail" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="number" [(ngModel)]="yonetici.kus" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="number" [(ngModel)]="yonetici.kedi" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="number" [(ngModel)]="yonetici.kopek" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="number" [(ngModel)]="yonetici.adm" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="number" [(ngModel)]="yonetici.bolgeId" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td><input type="checkbox" [(ngModel)]="yonetici.engelli" (ngModelChange)="handleModelChange(yonetici.id)"></td>
+            <td>
+              <button class="delete-btn" (click)="deleteRow(yonetici.id)">Sil</button>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  } @else {
+    <p>Gösterilecek yönetici yok. Lütfen "Getir" butonuna basın.</p>
+  }
+
+  @if (newRows().length > 0) {
+    <h2>Yeni Kayıtlar</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>İsim</th>
+          <th>Şifre</th>
+          <th>Telefon</th>
+          <th>Mail</th>
+          <th>Kuş</th>
+          <th>Kedi</th>
+          <th>Köpek</th>
+          <th>Admin</th>
+          <th>Bölge ID</th>
+          <th>Engelli</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of newRows(); track $index) {
+          <tr>
+            <td><input [(ngModel)]="row.isim"></td>
+            <td><input type="password" [(ngModel)]="row.sifre"></td>
+            <td><input [(ngModel)]="row.telefon"></td>
+            <td><input [(ngModel)]="row.mail"></td>
+            <td><input type="number" [(ngModel)]="row.kus"></td>
+            <td><input type="number" [(ngModel)]="row.kedi"></td>
+            <td><input type="number" [(ngModel)]="row.kopek"></td>
+            <td><input type="number" [(ngModel)]="row.adm"></td>
+            <td><input type="number" [(ngModel)]="row.bolgeId"></td>
+            <td><input type="checkbox" [(ngModel)]="row.engelli"></td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</div>

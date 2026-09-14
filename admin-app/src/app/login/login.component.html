@@ -1,0 +1,17 @@
+<div class="login-container">
+  <h2>Yönetici Girişi</h2>
+  <form (ngSubmit)="login()">
+    <div class="form-group">
+      <label for="isim">İsim:</label>
+      <input type="text" id="isim" name="isim" [(ngModel)]="isim" required>
+    </div>
+    <div class="form-group">
+      <label for="sifre">Şifre:</label>
+      <input type="password" id="sifre" name="sifre" [(ngModel)]="sifre" required>
+    </div>
+    <button type="submit">Giriş Yap</button>
+    @if (errorMessage) {
+      <p class="error-message">{{ errorMessage }}</p>
+    }
+  </form>
+</div>

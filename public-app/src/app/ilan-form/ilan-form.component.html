@@ -1,0 +1,211 @@
+<app-info-message messageKey="ilanFormPage" [messageText]="ilanFormInfoMessage"></app-info-message>
+<div class="form-container">
+  @if(authService.isLoggedIn()){
+    @if (bilgiMesaji(); as message) {
+      <div [class]="'bilgi-mesaji ' + message.type">
+        {{ message.text }}
+      </div>
+    }
+    <h1>Yeni İlan Oluştur</h1>
+    <form #ilanForm="ngForm" (ngSubmit)="createIlan()">
+
+    <div class="form-section">
+      <h2>Temel Bilgiler</h2>
+      <div class="form-group">
+        <label for="baslik">İlan Başlığı</label>
+        <input type="text" id="baslik" name="baslik" [(ngModel)]="ilanModel.baslik" required>
+      </div>
+
+      <div class="form-group">
+        <label for="ilanTuru">İlan Türü</label>
+        <select id="ilanTuru" name="ilanTuru" [(ngModel)]="ilanModel.ilanTuru">
+          <option value="sahiplendirme">Normal Yuva Arayan</option>
+          <option value="kayip">Kayıp</option>
+          <option value="acilKan">Acil Kan İlanı</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="hayvanTuru">Hayvan Türü</label>
+        <select id="hayvanTuru" name="hayvanTuru" [(ngModel)]="ilanModel.hayvanTuru">
+          <option value="kedi">Kedi</option>
+          <option value="kopek">Köpek</option>
+          <option value="kus">Kuş</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="bolge">Bölge</label>
+        <select id="bolge" name="bolgeId" [(ngModel)]="ilanModel.bolgeId" required>
+          <option [ngValue]="undefined">Bölge Seçin</option>
+          @for(bolge of bolgeler(); track bolge.id){
+            <option [value]="bolge.id">{{ bolge.isim }}</option>
+          }
+        </select>
+      </div>
+    </div>
+
+    <!-- Dynamic Form Sections -->
+    <div [ngSwitch]="ilanModel.ilanTuru">
+      
+      <!-- Normal Yuva Arayan Formu -->
+      <div *ngSwitchCase="'sahiplendirme'" class="form-section">
+        <h2>Detaylar (Yuva Arayan)</h2>
+        <div class="form-group">
+          <label for="hayvanIsim">Hayvanın Adı (biliniyorsa)</label>
+          <input type="text" id="hayvanIsim" name="hayvanIsim" [(ngModel)]="ilanModel.hayvanIsim">
+        </div>
+         <div class="form-group">
+            <label for="aciklama">Açıklama</label>
+            <textarea id="aciklama" name="aciklama" [(ngModel)]="ilanModel.aciklama" rows="5" required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="ulasilabilirlik">Ulaşılabilirlik</label>
+            <select id="ulasilabilirlik" name="ulasilabilirlik" [(ngModel)]="ilanModel.formVerileri.ulasilabilirlik">
+                <option value="Bakıyorum">Bakıyorum</option>
+                <option value="Aracıyım">Aracıyım</option>
+                <option value="Bulamayabilirim">Bulamayabilirim</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Müsaitlik</label>
+            <select (change)="onMusaitlikHelperChange($event)" class="helper-select">
+                <option value="">Yardımcı seçenekler...</option>
+                <option value="Her zaman arayabilirsiniz.">Her Zaman</option>
+                <option value="Sadece akşamları arayınız.">Sadece Akşamları</option>
+                <option value="Lütfen mesaj atınız.">Lütfen Mesaj Atın</option>
+            </select>
+            <input type="text" name="musaitlikMetni" [(ngModel)]="ilanModel.formVerileri.musaitlikMetni" placeholder="Müsaitlik durumunuzu yazınız (en fazla 60 karakter)" maxlength="60" class="main-input">
+        </div>
+
+        <div class="form-group">
+            <label for="ulastirma">Ulaştırma</label>
+            <select id="ulastirma" name="ulastirma" [(ngModel)]="ilanModel.formVerileri.ulastirma">
+                <option value="Yeterki sahiplenen çıksın">Yeterki sahiplenen çıksın</option>
+                <option value="Gün içinde mutlaka">Gün içinde mutlaka</option>
+                <option value="Hemen olmaz randevu">Hemen olmaz randevu oluşturabilirim maalesef</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="durumu">Hayvanın Durumu</label>
+            <select id="durumu" name="durumu" [(ngModel)]="ilanModel.formVerileri.durumu">
+                <option value="Hasta">Hasta</option>
+                <option value="İyi">İyi</option>
+                <option value="Durgun">Durgun</option>
+                <option value="Hiç iyi görünmüyor">Hiç iyi görünmüyor</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="yeme">Yeme Durumu</label>
+            <select id="yeme" name="yeme" [(ngModel)]="ilanModel.formVerileri.yeme">
+                <option value="Az">Az</option>
+                <option value="Azdan az">Azdan az</option>
+                <option value="Fena değil">Fena değil</option>
+                <option value="Yiyor">Yiyor</option>
+                <option value="Görmedim">Görmedim</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="su">Su Durumu</label>
+            <select id="su" name="su" [(ngModel)]="ilanModel.formVerileri.su">
+                <option value="İyi">İyi</option>
+                <option value="Az">Az</option>
+                <option value="Hiç">Hiç</option>
+                <option value="Görmedim">Görmedim</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="veteriner">Veteriner Durumu</label>
+            <select id="veteriner" name="veteriner" [(ngModel)]="ilanModel.formVerileri.veteriner">
+                <option value="Götüremedim">Götüremedim</option>
+                <option value="Götürdüm">Götürdüm</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="onem">Önem Durumu</label>
+            <select id="onem" name="onem" [(ngModel)]="ilanModel.formVerileri.onem">
+                <option value="Sevenini bekliyor">Sevenini bekliyor</option>
+                <option value="Endişeliyim Acil">Endişeliyim Acil</option>
+                <option value="Durumum yok">Durumum yok</option>
+                <option value="Müdahale kritik">Müdahale kritik noktada</option>
+                <option value="İdare ediyoruz">İdare ediyoruz</option>
+                <option value="Sokağa bırakıcaz">Sokağa bırakıcaz</option>
+                <option value="Ayrılıcaz">Ayrılıcaz</option>
+            </select>
+        </div>
+      </div>
+
+      <!-- Kayıp Formu -->
+      <div *ngSwitchCase="'kayip'" class="form-section">
+        <h2>Detaylar (Kayıp)</h2>
+        <div class="form-group">
+          <label for="kayipTarihi">Kayıp Tarihi</label>
+          <input type="date" id="kayipTarihi" name="kayipTarihi" [(ngModel)]="ilanModel.kayipTarihi">
+        </div>
+         <div class="form-group">
+            <label for="aciklama">Açıklama</label>
+            <textarea id="aciklama" name="aciklama" [(ngModel)]="ilanModel.aciklama" rows="5" required></textarea>
+         </div>
+        <!-- Other fields from mimari_yapi.md can be added here -->
+      </div>
+
+      <!-- Acil Kan İlanı Formu -->
+      <div *ngSwitchCase="'acilKan'" class="form-section">
+        <h2>Detaylar (Acil Kan)</h2>
+        <div class="form-group">
+          <label for="kanGrubu">Kan Grubu</label>
+          <input type="text" id="kanGrubu" name="kanGrubu" [(ngModel)]="ilanModel.kanGrubu">
+        </div>
+        <div class="form-group">
+          <label for="klinikAdi">Klinik Adı (Zorunlu)</label>
+          <input type="text" id="klinikAdi" name="klinikAdi" [(ngModel)]="ilanModel.klinikAdi" required>
+        </div>
+         <div class="form-group">
+            <label for="aciklama">Açıklama</label>
+            <textarea id="aciklama" name="aciklama" [(ngModel)]="ilanModel.aciklama" rows="5" required></textarea>
+         </div>
+        <!-- Other fields from mimari_yapi.md can be added here -->
+      </div>
+    </div>
+
+    <div class="form-section">
+      <h2>Fotoğraflar</h2>
+      <p>Lütfen fotoğrafları bir resim yükleme sitesine yükleyip linklerini aşağıya yapıştırın.</p>
+      <button type="button" (click)="openImageUploader()">Fotoğraf Yükleme Yardımcısı</button>
+      <div class="form-group">
+        <label for="topluLink">Toplu Link Alanı</label>
+        <div class="input-with-button">
+          <input type="text" id="topluLink" name="topluLink" placeholder="Tüm linkleri buraya yapıştırıp 'Linkleri Çek' butonuna basın" [(ngModel)]="ilanModel.topluLink" class="toplu-link-input">
+          <button type="button" (click)="distributeLinks()" class="cek-link-btn">Linkleri Çek</button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="fotoLink1">Fotoğraf Linki 1</label>
+        <input type="url" id="fotoLink1" name="fotoLink1" [(ngModel)]="ilanModel.fotoLink1">
+      </div>
+      <div class="form-group">
+        <label for="fotoLink2">Fotoğraf Linki 2</label>
+        <input type="url" id="fotoLink2" name="fotoLink2" [(ngModel)]="ilanModel.fotoLink2">
+      </div>
+      <div class="form-group">
+        <label for="fotoLink3">Fotoğraf Linki 3</label>
+        <input type="url" id="fotoLink3" name="fotoLink3" [(ngModel)]="ilanModel.fotoLink3">
+      </div>
+    </div>
+
+    <button type="submit" [disabled]="!ilanForm.form.valid" class="submit-btn">İlanı Kaydet</button>
+  </form>
+  } @else {
+    <div class="giris-uyari">
+      <h2>Bu alanı görüntülemek için giriş yapmalısınız.</h2>
+      <p>Lütfen ilan vermek için <a routerLink="/login">giriş yapın</a>.</p>
+    </div>
+  }
+</div>

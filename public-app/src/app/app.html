@@ -1,0 +1,18 @@
+<header class="main-header">
+  <nav>
+    <a routerLink="/vitrin">Vitrin</a>
+    <a routerLink="/ilan-form">İlan Ver</a>
+  </nav>
+  <div class="user-actions">
+    @if (currentUser()) {
+      <span class="username">Hoşgeldin, {{ currentUser()?.isim }}</span>
+      <a (click)="logout()" class="logout-link">Çıkış Yap</a>
+    } @else {
+      <a routerLink="/login" class="login-link">Giriş Yap</a>
+    }
+  </div>
+</header>
+
+<main>
+  <router-outlet />
+</main>

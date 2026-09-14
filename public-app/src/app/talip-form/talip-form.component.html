@@ -1,0 +1,48 @@
+<app-info-message messageKey="talipFormPage" [messageText]="talipFormInfoMessage"></app-info-message>
+<div class="form-container">
+  @if(authService.isLoggedIn()){
+    @if (bilgiMesaji(); as message) {
+      <div [class]="'bilgi-mesaji ' + message.type">
+        {{ message.text }}
+      </div>
+    }
+    @if (ilan(); as i) {
+      <div class="ilan-summary">
+        <h2>Başvuru Yaptığınız İlan</h2>
+        <h3>{{ i.baslik }}</h3>
+        <p><strong>Hayvan:</strong> {{ i.hayvanIsim }}</p>
+        <p><strong>Açıklama:</strong> {{ i.aciklama }}</p>
+      </div>
+    }
+    <hr>
+
+    <h1>Talip Formu</h1>
+
+    @if (isOwner()) {
+      <div class="giris-uyari">
+        <h2>Kendi ilanınıza cevap yazamazsınız / başvuramazsınız.</h2>
+        <p>Bu ilan size aittir. Gelen başvuruları <a routerLink="/my-ads-applicants">İlanlarıma Talipler</a> sayfasından yönetebilirsiniz.</p>
+      </div>
+    } @else {
+      <form #talipForm="ngForm" (ngSubmit)="submitApplication()">
+        <div class="form-group">
+          <label for="talipMsj">Mesajınız (en fazla 150 kelime)</label>
+          <textarea
+            id="talipMsj"
+            name="talipMsj"
+            [(ngModel)]="talipMsj"
+            rows="6"
+            maxlength="1000"
+            required></textarea>
+        </div>
+
+        <button type="submit" [disabled]="!talipForm.form.valid" class="submit-btn">Başvuruyu Gönder</button>
+      </form>
+    }
+  } @else {
+    <div class="giris-uyari">
+      <h2>Bu alanı görüntülemek için giriş yapmalısınız.</h2>
+      <p>Lütfen bir ilana başvurmak için <a routerLink="/login">giriş yapın</a>.</p>
+    </div>
+  }
+</div>

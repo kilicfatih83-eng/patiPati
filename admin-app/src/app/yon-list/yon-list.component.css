@@ -1,0 +1,20 @@
+/* Standart Hata ve Başarı Mesajları (Admin App - Seçenek A: Bileşen İçi İzolasyon) */
+.error-message {
+  color: #721c24;
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 12px 15px;
+  margin-bottom: 15px;
+  font-weight: 500;
+}
+
+.success-message {
+  color: #155724;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  border-radius: 4px;
+  padding: 12px 15px;
+  margin-bottom: 15px;
+  font-weight: 500;
+}

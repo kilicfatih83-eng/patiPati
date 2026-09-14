@@ -1,0 +1,147 @@
+<div *ngIf="bilgiMesaji()" class="bilgi-mesaji">
+  {{ bilgiMesaji() }}
+</div>
+
+
+<div class="container">
+  <h1>Bölge Talepleri</h1>
+
+  <div class="controls">
+    <!-- Filtreler -->
+    <div class="filter-group">
+        <div class="durum-filters-checkbox">
+          <!-- Status filter checkboxes -->
+          @for(item of durumlarFiltre; track item.id){
+            <label>
+              <input type="checkbox" [(ngModel)]="item.checked" /> {{item.id}} - {{item.text}}
+            </label>
+          }
+        </div>
+      <div class="tur-filter">
+        <small style="display: block; margin-bottom: 5px;">(Hiçbiri seçilmezse tüm türler listelenir)</small>
+        <label><input type="checkbox" [(ngModel)]="filters.turler.kedi"> Kedi</label>
+        <label><input type="checkbox" [(ngModel)]="filters.turler.kopek"> Köpek</label>
+        <label><input type="checkbox" [(ngModel)]="filters.turler.kus"> Kuş</label>
+      </div>
+    </div>
+
+    <!-- Sayfalama -->
+    <div class="pagination-group">
+      <select name="limit" [(ngModel)]="filters.limit" (ngModelChange)="getTalipler()">
+        <option value="50">50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+      <button (click)="changePage('prev')" [disabled]="filters.page <= 1"><< Önceki</button>
+      <span>Sayfa {{ filters.page }} / {{ totalPages() }}</span>
+      <button (click)="changePage('next')" [disabled]="filters.page >= totalPages()">Sonraki >></button>
+    </div>
+
+    <!-- Eylemler -->
+    <div class="action-group">
+      <button (click)="getTalipler()">Filtrele</button>
+      <button (click)="kaydet()" class="primary-action">Değişiklikleri Kaydet</button>
+      <div class="bulk-actions">
+        <small>Seçilenlere uygula:</small>
+        @for(btn of bulkUpdateButtons; track btn.id){
+          <button (click)="bulkUpdateStatus(btn.id)">{{btn.id}}-{{btn.text}}</button>
+        }
+      </div>
+    </div>
+  </div>
+
+  @if(isLoading()) {
+    <p>Yükleniyor...</p>
+  }
+  
+  <!-- Talip Tablosu -->
+  <table class="ilan-table">
+    <thead>
+      <tr>
+        <th><input type="checkbox" (change)="toggleSelectAll($event)"></th>
+        <th>ID</th>
+        <th>İlan ID</th>
+        <th>Durum</th>
+        <th>Tür</th>
+        <th>Talip ID</th>
+        <th>Başvuru Tarihi</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (talip of talipler(); track talip.id) {
+        <tr [class.selected]="selectedTalip()?.id === talip.id">
+          <td><input type="checkbox" [(ngModel)]="talip.selected" (click)="$event.stopPropagation()"></td>
+          <td (click)="openTalipModal(talip)">{{ talip.id }}</td>
+          <td (click)="openIlanModal(talip.ilanId)" class="clickable-id">{{ talip.ilanId }}</td>
+          <td>{{ talip.durum }}</td>
+          <td>{{ talip.hayvanTuru }}</td>
+          <td>{{ talip.talipId }}</td>
+          <td>{{ talip.basvuruTarihi | date:'dd/MM/yy HH:mm' }}</td>
+        </tr>
+      }
+    </tbody>
+  </table>
+
+  <!-- Talip Yönetim Modalı -->
+  @if (selectedTalip(); as talip) {
+    <div class="modal-overlay" (click)="closeModal()">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <button class="close-modal" (click)="closeModal()">X</button>
+        <h2>Talep ID: #{{ talip.id }}</h2>
+        
+        <div class="talip-details">
+          <p><strong>İlan ID:</strong> {{ talip.ilanId }}</p>
+          <p><strong>Talip ID:</strong> {{ talip.talipId }}</p>
+          <p><strong>Başvuru Mesajı:</strong> {{ talip.talipMsj }}</p>
+          <p><strong>İlan Sahibi Yanıtı:</strong> {{ talip.sahipMsj }}</p>
+        </div>
+
+        <div class="modal-actions">
+          <small>Durumu Güncelle:</small>
+          @for(item of modalHizliGuncelleButtons; track item.id) {
+            <button (click)="hizliDurumGuncelle(item.id)" [class.selected]="talip.durum === item.id">{{ item.id }}-{{ item.text }}</button>
+          }
+          <button (click)="closeModal()">Kapat</button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- İlan Detay Modalı -->
+  @if (selectedIlan(); as ilan) {
+    <div class="modal-overlay" (click)="closeIlanModal()">
+      <div class="modal-content" (click)="$event.stopPropagation()">
+        <button class="close-modal" (click)="closeIlanModal()">X</button>
+        <h2>İlan Detayı: #{{ ilan.id }}</h2>
+        
+        <div class="ilan-details">
+          <p><strong>Başlık:</strong> {{ ilan.baslik }}</p>
+          <p><strong>Hayvan İsmi:</strong> {{ ilan.hayvanIsim }}</p>
+          <p><strong>Açıklama:</strong> {{ ilan.aciklama }}</p>
+          
+          <div class="images">
+            @if(ilan.fotoLink1) { <img [src]="ilan.fotoLink1" alt="Foto 1"> }
+            @if(ilan.fotoLink2) { <img [src]="ilan.fotoLink2" alt="Foto 2"> }
+            @if(ilan.fotoLink3) { <img [src]="ilan.fotoLink3" alt="Foto 3"> }
+          </div>
+
+          @if(ilan.formVerileri) {
+            <h3>Form Bilgileri</h3>
+            <div class="form-data">
+                @for (key of getObjectKeys(ilan.formVerileri); track key) {
+                    <div class="form-data-item">
+                        <strong>{{ key }}:</strong> {{ ilan.formVerileri[key] }}
+                    </div>
+                }
+            </div>
+          }
+        </div>
+
+        <div class="modal-actions">
+          <button (click)="closeIlanModal()">Kapat</button>
+        </div>
+      </div>
+    </div>
+  }
+
+</div>

@@ -1,0 +1,38 @@
+<header>
+  <nav>
+    <div class="left-nav">
+      <a [routerLink]="['/']" class="app-title">Vitrin</a>
+    </div>
+
+    <div class="center-nav">
+      @if (authService.isLoggedIn()) {
+        <span class="user-quota">
+          Yayın Hakkı: 
+          @if(yayinHakki() !== null) {
+            {{ yayinHakki() }}
+          } @else {
+            <span class="unknown-quota">?</span>
+          }
+        </span>
+        <button (click)="guncelle()">Kontrol Et</button>
+      } @else {
+        <span class="user-quota login-prompt">Giriş Yapın</span>
+      }
+    </div>
+
+    <div class="right-nav">
+        <a [routerLink]="['/ilan/yeni']">İlan Ver</a>
+        <a [routerLink]="['/my-ads']">İlanlarım</a>
+        <a [routerLink]="['/my-ads-applicants']">İlanlarıma Talipler</a>
+        <a [routerLink]="['/my-applications']">Başvurularım</a>
+        <a [routerLink]="['/site-kullanim']">Site Kullanımı</a>
+        
+        <button (click)="login()">Giriş Yap</button>
+        <button (click)="logout()">Çıkış Yap</button>
+
+        <button class="help-toggle" (click)="toggleInfoHelp()">
+          {{ showInfoMessages() ? 'Yardımı Kapat' : 'Yardımı Aç' }}
+        </button>
+    </div>
+  </nav>
+</header>
