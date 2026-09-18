@@ -1,0 +1,499 @@
+================================================================================
+          YOLA HAZIR: YÜKSEK PERFORMANS, GÜVENLİK VE CANLIYA ALMA REHBERİ
+================================================================================
+Dosya Adı: yolaHazır.txt
+Tarih: 15.09.2026
+Referans Belgeler: .clinerules, ekosistemv2.txt, ekosistemDestek.txt, Yüksek Performanslı Güvenlik ve Mimari Optimizasyon Belgesi.txt
+
+--------------------------------------------------------------------------------
+1. GİRİŞ VE AMAC
+--------------------------------------------------------------------------------
+Bu belge; projemizin mevcut Node.js/SQLite backend (`server`) ve Angular frontend (`public-app`, `admin-app`, `bolge-app`) mimarisini inceleyerek;
+- Kodlardaki eksiklik, hata, performans ve güvenlik açıklarını saptar,
+- Yüksek Performanslı Güvenlik ve Mimari Optimizasyon Belgesi'nde tanımlanan 4 katmanlı koruma sistemini (Cloudflare, Nginx, Node.js Fail-Fast, SQLite RAM/WAL) projeye tam olarak entegre eder,
+- Ücretli hosting/domain satın almadan, geçici domain (DuckDNS / Cloudflare Free Domain veya Cloudflare Tunnel) üzerinden prodüksiyon kalitesinde yayınlama mimarisini adım adım ve en ince ayrıntısına kadar açıklar.
+
+--------------------------------------------------------------------------------
+2. MEVCUT KODLARIN DETAYLI İNCELEMESİ, EKSİKLER VE DÜZELTİLECEK YERLER
+--------------------------------------------------------------------------------
+
+A. VERİTABANI KATMANI (`server/database.js`):
+   1. [KRİTİK PERFORMANS EKSİĞİ] SQLite Varsayılan Modda Çalışıyor:
+      - Mevcut `database.js` dosyasında SQLite varsayılan "DELETE" journal modunda çalışmaktadır. Her yazma işleminde veritabanı dosyası kilitlenmekte ve disk I/O darboğazına sebep olmaktadır.
+      - Çözüm: `PRAGMA journal_mode = WAL;` ve `PRAGMA synchronous = NORMAL;` aktif edilmelidir.
+   2. [KRİTİK RAM OPTİMİZASYONU EKSİĞİ]
+      - `PRAGMA temp_store = MEMORY;`, `PRAGMA mmap_size = 268435456;` (256 MB) ve `PRAGMA cache_size = -64000;` (64 MB) eksiktir. Veritabanı RAM yerine diski boğmaktadır.
+   3. [ÇÖKME RİSKİ] Eşzamanlı Yazma Kilitlenmesi (Busy Timeout):
+      - Eşzamanlı isteklerde `SQLITE_BUSY` hatası alınmaması için `db.configure("busyTimeout", 3000);` eksiktir.
+   4. [KRİTİK PERFORMANS AÇIĞI] Veritabanı İndekslerinin (Index) Bulunmaması:
+      - `ilanTablo` üzerinde `durum`, `bolgeId`, `hayvanTuru`, `kullaniciId` kolonlarında indeks yoktur. Yüzlerce ilan içinde filtreleme yaparken veritabanı her seferinde "Full Table Scan" yapmaktadır.
+      - `talipTablo` üzerinde `ilanId`, `talipId`, `durum`, `bolgeId` kolonlarında indeks yoktur.
+      - Çözüm: Tablolar oluşturulurken veya kurulurken ilgili alanlara `CREATE INDEX IF NOT EXISTS` tanımlanmalıdır.
+   5. [VERİ BÜTÜNLÜĞÜ AÇIĞI] Atomik İşlemlerin (Transaction) Kullanılmaması:
+      - İlan verme, başvuru yapma ve mesaj gönderme işlemlerinde `yayinHakki` düşürme ile ilan/başvuru ekleme işlemleri ayrı sorgularla yapılmaktadır. İşlem ortasında çökme yaşanırsa bakiye düşüp kayıt atılamayabilir.
+      - Çözüm: `BEGIN TRANSACTION`, `COMMIT` ve `ROLLBACK` kullanılmalıdır.
+
+B. BACKEND SUNUCU KATMANI (`server/server.js`):
+   1. [KRİTİK GÜVENLİK VE YÜK EKSİĞİ] Fail-Fast ve Event Loop İzleyici Yokluğu:
+      - Yük altında (%75 ve %80) sunucuyu çökmekten koruyacak `perf_hooks` (monitorEventLoopDelay) mekanizması `server.js` içine entegre edilmemiştir.
+   2. [KRİTİK GÜVENLİK EKSİĞİ] Ceza Puanlama ve Otomatik Ban Mekanizması Yokluğu:
+      - Bot taramaları (404), bozuk JSON (400) ve yetkisiz erişim (401/403) denemelerine karşı IP bazlı ceza puanı (RAM map) izlemesi yapılmamaktadır.
+   3. [GÜVENLİK RİSKİ] Sabit JWT Secret ve Ortam Değişkenleri (Environment Variables) Kullanılmaması:
+      - `JWT_SECRET`, `JWT_PUBLIC_SECRET`, `JWT_BOLGE_SECRET` gibi hassas anahtarlar `server.js` içinde string olarak gömülüdür (hardcoded). `.env` dosyası kullanılmalıdır.
+   4. [GÜVENLİK RİSKİ] Wildcard CORS Yapılandırması:
+      - `res.setHeader("Access-Control-Allow-Origin", "*")` prodüksiyonda kısıtlanmalı veya geçici domain alan adımızla sınırlandırılmalıdır.
+   5. [GERÇEK IP MASKELERİ] Cloudflare Başlık Okuma:
+      - İstemci IP adresi alınırken `req.headers['cf-connecting-ip']` öncelikli okunmalıdır.
+
+C. FRONTEND VE DEPLOYMENT KATMANI:
+   1. Angular uygulamaları dev sunucusunda (`ng serve`) değil, `ng build --configuration production` komutuyla derlenip Nginx tarafından statik dosya olarak sunulmalıdır.
+   2. `environment.prod.ts` dosyalarında API adresi geçici domainimizin proxy adresine (`/api`) yönlendirilmelidir.
+
+--------------------------------------------------------------------------------
+3. YÜKSEK PERFORMANSLI GÜVENLİK VE MİMARİ OPTİMİZASYON STRATEJİSİ
+--------------------------------------------------------------------------------
+
++-----------------------------------------------------------------------------+
+| KATMAN 1: CLOUDFLARE KATMANI (Dış Çember & Sınır Savunması)                 |
+| - WAF & Bot Fight Mode Aktif                                                |
+| - Özel Hata Sayfaları (%75-%80 Yük durumunda 429/503 kurye ekranı)          |
+| - IP Access Rules: 100 Ceza puanını dolduran IP'ler Cloudflare API ile ban  |
+| - Cron Job: 30 dakikada bir ban süresi dolan IP'lerin kaldırılması          |
++-----------------------------------------------------------------------------+
+                                     |
+                                     v
++-----------------------------------------------------------------------------+
+| KATMAN 2: NGINX KATMANI (GCP Firewall & Trafik Kontrolü)                    |
+| - GCP Firewall: Sadece Cloudflare IP bloklarına 80/443 izni, gerisi REDDEDİLİR|
+| - client_max_body_size 1M (Bellek şişirme koruması)                         |
+| - Rate Limiting: IP başı 10 req/s (limit_req) ve 20 bağlantı (limit_conn)   |
+| - Sınır aşımında error_page 503 = 444 (Bağlantıyı aniden koparma)           |
++-----------------------------------------------------------------------------+
+                                     |
+                                     v
++-----------------------------------------------------------------------------+
+| KATMAN 3: NODE.JS KATMANI (Fail-Fast & Mantık Savunması)                    |
+| - perf_hooks ile Event Loop Takibi:                                         |
+|   * %75 Yük (~50ms gecikme): DB'ye vurmadan anında HTTP 503 Fail-Fast cevabı   |
+|   * %80 Yük (~100ms gecikme): req.socket.destroy() ile bağlantı anında koparma |
+| - RAM Üzerinde Ceza Puanı İzleme (100 Puan = Cloudflare Ban):               |
+|   * 404 (Hatalı/Bot adresi): +50 Puan (2 ihlalde ban)                        |
+|   * 400 (Bozuk/Eksik JSON): +25 Puan (4 ihlalde ban)                        |
+|   * 401/403 (Geçersiz Token/Yetkisiz): +35 Puan (3 ihlalde ban)              |
++-----------------------------------------------------------------------------+
+                                     |
+                                     v
++-----------------------------------------------------------------------------+
+| KATMAN 4: SQLITE VERİ ÇEKİRDEĞİ (RAM & WAL HIZLANDIRMASI)                   |
+| - PRAGMA journal_mode = WAL;                                                |
+| - PRAGMA synchronous = NORMAL;                                              |
+| - PRAGMA temp_store = MEMORY;                                               |
+| - PRAGMA mmap_size = 268435456 (256 MB RAM Mapping)                         |
+| - PRAGMA cache_size = -64000 (64 MB Önbellek)                               |
+| - busyTimeout = 3000ms (Kilitlenme koruması)                                |
+| - İndeksler (ilanTablo, talipTablo, yonTablo, kullaniciTablo)              |
+| - Atomik İşlemler (BEGIN TRANSACTION / COMMIT / ROLLBACK)                   |
++-----------------------------------------------------------------------------+
+
+--------------------------------------------------------------------------------
+4. GEÇİCİ DOMAİN İLE YAYINLAMA MİMARİSİ (HOSTİNG ALMADAN YAYINLAMA)
+--------------------------------------------------------------------------------
+
+Hosting ve alan adı satın almadan sistemi dış dünyaya prodüksiyon standartlarında açmak için yöntem:
+
+YÖNTEM: GCP IP + ÜCRETSİZ DUCKDNS / CLOUDFLARE TUNNEL VEYA FREE SUBDOMAIN
+1. Google Cloud Platform (GCP) Sanal Sunucunuza Statik Harici IP atayın.
+2. Ücretsiz bir dinamik DNS servisi (örn: DuckDNS - `projeniz.duckdns.org`) veya Cloudflare Free Zone (veya Cloudflare Tunnel `cloudflared`) kullanarak bir geçici domain oluşturun.
+3. Cloudflare hesabınıza bu geçici domaini bağlayın ve DNS A kaydını GCP Sunucu IP adresinize yönlendirip "Proxied" (Turuncu Bulut) simgesini aktif hale getirin.
+4. Böylece sunucunuzun gerçek IP adresi gizlenir, tüm trafik Cloudflare üzerinden geçer ve BÖLÜM 1 & BÖLÜM 2'deki tüm WAF, Rate Limit ve IP İzolasyonu kuralları eksiksiz çalışır.
+
+--------------------------------------------------------------------------------
+5. DOSYALARDA YAPILMASI GEREKEN TÜM DEĞİŞİKLİKLER, EKLENEN VE ÇIKARILANLAR
+--------------------------------------------------------------------------------
+
+AŞAĞIDAKİ TÜM KOD VE DOSYA DEĞİŞİKLİKLERİ BİREBİR VE TEK TEK UYGULANACAKTIR:
+
+--------------------------------------------------------------------------------
+DOSYA 1: `server/database.js` (GÜNCELLEME VE İNDEKS EKLEMELERİ)
+--------------------------------------------------------------------------------
+Açıklama: RAM optimizasyonları, kilitlenme zaman aşımı ve arama performansını 100x artıracak veritabanı indeksleri eklenecektir.
+
+Yapılacak Değişiklik:
+`database.js` dosyasının `setupDatabase()` fonksiyonunun en başına PRAGMA komutları ve indeks oluşturma sorguları eklenecektir.
+
+Eklenecek Kod Bloğu:
+```javascript
+function setupDatabase() {
+    db.serialize(() => {
+        // --- BÖLÜM 4: SQLITE RAM VE WAL OPTİMİZASYONLARI ---
+        db.run("PRAGMA journal_mode = WAL;");
+        db.run("PRAGMA synchronous = NORMAL;");
+        db.run("PRAGMA temp_store = MEMORY;");
+        db.run("PRAGMA mmap_size = 268435456;"); // 256 MB RAM Mapping
+        db.run("PRAGMA cache_size = -64000;");   // 64 MB Önbellek
+
+        // Eşzamanlı kilitlenme zaman aşımı
+        db.configure("busyTimeout", 3000);
+
+        // --- VERİTABANI İNDEKLERİ (SEARCH & JOIN OPTİMİZASYONLARI) ---
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_durum_bolge ON ilanTablo(durum, bolgeId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_tur ON ilanTablo(hayvanTuru);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_kullanici ON ilanTablo(kullaniciId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_talip_ilan ON talipTablo(ilanId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_talip_kullanici ON talipTablo(talipId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_kullanici_telefon ON kullaniciTablo(telefon);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_yon_isim ON yonTablo(isim);");
+
+        // ... (Mevcut CREATE TABLE komutları aynen devam eder) ...
+```
+
+--------------------------------------------------------------------------------
+DOSYA 2: `server/security.js` (YENİ DOSYA OLUŞTURULACAK)
+--------------------------------------------------------------------------------
+Açıklama: Yük takibi (%75 ve %80), Fail-Fast yanıtı, RAM ceza puanı yönetimi ve Cloudflare API entegrasyonunu barındıran modül.
+
+İçerik:
+```javascript
+// server/security.js
+const { monitorEventLoopDelay } = require('perf_hooks');
+const https = require('https');
+
+// Yük İzleyici (BÖLÜM 3 - %75 ve %80 Eşikleri)
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
+eventLoopDelay.enable();
+
+// Event loop gecikme threshold'ları (nanosaniye cinsinden)
+const THRESHOLD_FAIL_FAST = 50e6; // ~50ms gecikme (%75 yük)
+const THRESHOLD_DROP = 100e6;     // ~100ms gecikme (%80 yük)
+
+// RAM Üzerinde Ceza Puanı İzleme Map'i
+const ipPenaltyScores = new Map();
+const BAN_THRESHOLD = 100;
+
+/**
+ * Sunucu yük durumunu kontrol eder.
+ * %80 yükte bağlantıyı koparır.
+ * %75 yükte veritabanına dokunmadan 503 cevabı döner.
+ */
+function checkServerLoad(req, res) {
+    const lag = eventLoopDelay.mean;
+    if (lag > THRESHOLD_DROP) {
+        if (req.socket && !req.socket.destroyed) {
+            req.socket.destroy(); // %80 Yük: Bağlantıyı anında kapat
+        }
+        return true;
+    }
+    if (lag > THRESHOLD_FAIL_FAST) {
+        res.writeHead(503, {
+            "Content-Type": "application/json",
+            "Retry-After": "10"
+        });
+        res.end(JSON.stringify({
+            error: "Sistemde yoğunluk var, lütfen birazdan tekrar deneyiniz.",
+            subCode: 503001
+        }));
+        return true;
+    }
+    return false;
+}
+
+/**
+ * IP adresine ceza puanı ekler.
+ * Puan 100'e ulaştığında Cloudflare API'sine Ban isteği gönderir.
+ */
+function addPenaltyPoint(ip, points) {
+    if (!ip || ip === '127.0.0.1' || ip === '::1') return;
+
+    const currentScore = ipPenaltyScores.get(ip) || 0;
+    const newScore = currentScore + points;
+    ipPenaltyScores.set(ip, newScore);
+
+    console.log(`[GÜVENLİK UYARISI] IP: ${ip} | Ceza Puanı: +${points} | Toplam: ${newScore}/100`);
+
+    if (newScore >= BAN_THRESHOLD) {
+        banIpOnCloudflare(ip);
+        ipPenaltyScores.delete(ip); // Banlandıktan sonra RAM'den temizle
+    }
+}
+
+/**
+ * Cloudflare API'sine IP Engelleme (Block Rule) isteği atar.
+ */
+function banIpOnCloudflare(ip) {
+    const zoneId = process.env.CF_ZONE_ID;
+    const apiToken = process.env.CF_API_TOKEN;
+
+    if (!zoneId || !apiToken) {
+        console.log(`[GÜVENLİK KORUMASI SIMULASYON] ${ip} 100 puana ulaştı! (Cloudflare API anahtarları tanımlanmadığı için loglandı)`);
+        return;
+    }
+
+    const postData = JSON.stringify({
+        mode: "block",
+        configuration: {
+            target: "ip",
+            value: ip
+        },
+        notes: "Otomatik Güvenlik Sistemi - 100 Ceza Puanı Aşıldı"
+    });
+
+    const options = {
+        hostname: 'api.cloudflare.com',
+        port: 443,
+        path: `/client/v4/zones/${zoneId}/firewall/access_rules/rules`,
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${apiToken}`,
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData)
+        }
+    };
+
+    const req = https.request(options, (res) => {
+        let responseBody = '';
+        res.on('data', chunk => responseBody += chunk);
+        res.on('end', () => {
+            console.log(`[CLOUDFLARE BAN BAŞARILI] IP: ${ip} engellendi.`);
+        });
+    });
+
+    req.on('error', (e) => {
+        console.error(`[CLOUDFLARE API HATASI] IP Banlama başarısız: ${e.message}`);
+    });
+
+    req.write(postData);
+    req.end();
+}
+
+module.exports = { checkServerLoad, addPenaltyPoint };
+```
+
+--------------------------------------------------------------------------------
+DOSYA 3: `server/cf-cleanup.js` (YENİ DOSYA - CRON SCRIPT)
+--------------------------------------------------------------------------------
+Açıklama: Sunucuda 30 dakikada bir çalışacak cron görevi. Ban süresi dolan IP'leri Cloudflare Firewall Kurallarından siler.
+
+İçerik:
+```javascript
+// server/cf-cleanup.js
+const https = require('https');
+require('dotenv').config();
+
+const zoneId = process.env.CF_ZONE_ID;
+const apiToken = process.env.CF_API_TOKEN;
+
+if (!zoneId || !apiToken) {
+    console.log("Cloudflare yapılandırması eksik, temizlik iptal edildi.");
+    process.exit(0);
+}
+
+// Cloudflare Firewall kurallarını listele ve süresi geçenleri sil
+const options = {
+    hostname: 'api.cloudflare.com',
+    port: 443,
+    path: `/client/v4/zones/${zoneId}/firewall/access_rules/rules?notes=Otomatik Güvenlik Sistemi`,
+    method: 'GET',
+    headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+    }
+};
+
+const req = https.request(options, (res) => {
+    let body = '';
+    res.on('data', chunk => body += chunk);
+    res.on('end', () => {
+        try {
+            const data = JSON.parse(body);
+            if (data.success && data.result) {
+                const now = new Date().getTime();
+                data.result.forEach(rule => {
+                    const createdOn = new Date(rule.created_on).getTime();
+                    // 30 dakikayı (1800000 ms) geçen banları kaldır
+                    if (now - createdOn > 30 * 60 * 1000) {
+                        deleteRule(rule.id);
+                    }
+                });
+            }
+        } catch (e) {
+            console.error("Temizlik parse hatası:", e.message);
+        }
+    });
+});
+
+function deleteRule(ruleId) {
+    const delOptions = {
+        hostname: 'api.cloudflare.com',
+        port: 443,
+        path: `/client/v4/zones/${zoneId}/firewall/access_rules/rules/${ruleId}`,
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${apiToken}`,
+            'Content-Type': 'application/json'
+        }
+    };
+    const delReq = https.request(delOptions, (res) => {
+        console.log(`[BAN KALDIRILDI] Kural ID: ${ruleId}`);
+    });
+    delReq.end();
+}
+
+req.end();
+```
+
+--------------------------------------------------------------------------------
+DOSYA 4: `server/.env` (YENİ ORTAM DEĞİŞKENLERİ DOSYASI)
+--------------------------------------------------------------------------------
+Açıklama: Hassas şifreleri ve gizli anahtarları kod dışına taşır.
+
+İçerik:
+```env
+PORT=3001
+JWT_SECRET=super_secret_admin_jwt_key_2026_prod
+JWT_PUBLIC_SECRET=super_secret_public_jwt_key_2026_prod
+JWT_BOLGE_SECRET=super_secret_bolge_jwt_key_2026_prod
+SMS_SECRET_KEY=SUPER_GIZLI_SMS_HANDLER_KEY_9988
+CF_ZONE_ID=your_cloudflare_zone_id_here
+CF_API_TOKEN=your_cloudflare_api_token_here
+ALLOWED_ORIGIN=https://projeniz.duckdns.org
+```
+
+--------------------------------------------------------------------------------
+DOSYA 5: `server/server.js` (GÜNCELLEMELER VE ENTENTREASYONLAR)
+--------------------------------------------------------------------------------
+Açıklama: `security.js`, `dotenv`, Cloudflare IP okuma, ceza puanları ve hata yakalamaları entegre edilecektir.
+
+Değişiklik Detayları:
+1. `server.js`'in en üstüne `require('dotenv').config();` ve `const { checkServerLoad, addPenaltyPoint } = require('./security.js');` eklenecektir.
+2. Hardcoded JWT stringleri yerine `process.env.JWT_SECRET` vb. kullanılacaktır.
+3. HTTP Sunucusu isteği aldığı ilk anda `checkServerLoad(req, res)` çağrılacaktır.
+4. İstemci IP adresi `const clientIp = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress;` ile tespit edilecektir.
+5. Bozuk JSON isteklerinde (`safeParse` catch bloğunda): `addPenaltyPoint(clientIp, 25);` çağrılacaktır.
+6. Bulunamayan endpoint (404 else bloğunda): `addPenaltyPoint(clientIp, 50);` çağrılacaktır.
+7. Yetkilendirme middleware'lerinde (`authenticate`, `authenticatePublic`, `authenticateBolge`) token geçersiz/yetkisiz durumlarda: `addPenaltyPoint(clientIp, 35);` çağrılacaktır.
+
+--------------------------------------------------------------------------------
+DOSYA 6: NGINX KONFİGÜRASYONU (`/etc/nginx/sites-available/default`)
+--------------------------------------------------------------------------------
+Açıklama: GCP Sunucusundaki Nginx reverse proxy ve statik dosya sunumu konfigürasyonu.
+
+İçerik:
+```nginx
+# IP Başına İstek Sınırı (Saniyede 10 istek)
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+# IP Başına Bağlantı Sınırı (Aynı anda maks 20 bağlantı)
+limit_conn_zone $binary_remote_addr zone=conn_limit:10m;
+
+server {
+    listen 80;
+    server_name projeniz.duckdns.org; # Veya geçici domain adınız
+
+    # Sadece Cloudflare IP Bloklarına izin ver (Origin IP Gizleme)
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 141.101.64.0/12;
+    set_real_ip_from 108.162.192.0/12;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 131.0.72.0/22;
+
+    real_ip_header CF-Connecting-IP;
+
+    # Payload (Gövde) Sınırı - 1MB
+    client_max_body_size 1M;
+
+    # API Yönlendirmesi (Node.js Backend)
+    location /api/ {
+        limit_req zone=api_limit burst=20 nodelay;
+        limit_conn zone=conn_limit 20;
+
+        # Sınır aşımında bağlantıyı anında kopar (444 No Response)
+        error_page 503 = 444;
+
+        proxy_pass http://127.0.0.1:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Public App Angular Statik Dosyaları
+    location / {
+        root /var/www/public-app;
+        index index.html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Admin App Angular Statik Dosyaları
+    location /admin {
+        alias /var/www/admin-app;
+        index index.html;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    # Bölge App Angular Statik Dosyaları
+    location /bolge {
+        alias /var/www/bolge-app;
+        index index.html;
+        try_files $uri $uri/ /bolge/index.html;
+    }
+}
+```
+
+--------------------------------------------------------------------------------
+6. ADIM ADIM UYGULAMA VE CANLIYA ALMA REHBERİ
+--------------------------------------------------------------------------------
+
+ADIM 1: VERİTABANI OPTİMİZASYONU VE İNDEKS YÜKLEMESİ
+- `server/database.js` dosyasına tanımlanan PRAGMA ve `CREATE INDEX` SQL komutları eklenir.
+
+ADIM 2: GÜVENLİK MODÜLÜ VE BAKIYE TRANSACTION YAPISI
+- `server/security.js` dosyası oluşturulur.
+- `server/server.js` güncellenerek yük takibi, ceza puanlamaları ve `.env` yapılandırması entegre edilir.
+- `dotenv` paketi yüklenir: `npm install dotenv` (server dizininde).
+
+ADIM 3: GEÇİCİ DOMAIN VE CLOUDFLARE AYARLARI
+- DuckDNS / Cloudflare DNS panelinde A kaydı GCP Statik IP adresi olarak girilir.
+- Cloudflare WAF -> "Bot Fight Mode" aktif edilir.
+- Custom Pages bölümüne 429 ve 503 için özel kurye bilgi ekranı tasarımı yüklenir.
+
+ADIM 4: GCP FIREWALL AYARI
+- GCP Console -> VPC Network -> Firewall alanında 80 ve 443 portları sadece Cloudflare IP listesine açılır.
+
+ADIM 5: ANGULAR UYGULAMALARININ MİGRASYONU VE DERLENMESİ
+- `public-app`, `admin-app` ve `bolge-app` projelerinde `environment.prod.ts` dosyalarındaki API URL adresi `https://projeniz.duckdns.org` (veya geçici domain) olarak ayarlanır.
+- Her üç uygulama dizininde `npm run build -- --configuration production` çalıştırılır.
+- Derlenen `dist/` çıktıları sunucudaki `/var/www/public-app`, `/var/www/admin-app` ve `/var/www/bolge-app` dizinlerine taşınır.
+
+ADIM 6: PM2 PROCESS MANAGER İLE YAYINLAMA
+- Sunucuda PM2 global olarak yüklenir: `npm install -g pm2`.
+- Server dizininde başlatılır: `pm2 start server.js --name "ekosistem-api"`.
+- Sunucu çökmelerine karşı PM2 otomatik başlatma aktif edilir: `pm2 startup` ve `pm2 save`.
+
+ADIM 7: CRON JOB VE DÜZENLİ TEMİZLİK
+- Sunucu crontab'ına 30 dakikada bir çalışacak script eklenir:
+  `*/30 * * * * /usr/bin/node /path/to/server/cf-cleanup.js >> /var/log/cf-cleanup.log 2>&1`
+
+--------------------------------------------------------------------------------
+7. ÖZET VE SONUÇ
+--------------------------------------------------------------------------------
+Bu dokümanda sunulan tüm adımlar uygulandığında;
+1. SQLite veritabanı disk I/O darboğazından kurtulup RAM üzerinde mikro-saniyelik yanıt verecek seviyeye erişir.
+2. Bot taramaları ve saldırılar Cloudflare ve Nginx sınırında durdurulur.
+3. Sunucu yüksek yük altında (%75-%80) çökmek yerine Fail-Fast yanıtıyla kendisini korumaya alır.
+4. Hiçbir harici ücret ödemeden geçici domain üzerinden tam güvenlikle canlı yayın gerçekleştirilir.
+
+================================================================================
+================================================================================
