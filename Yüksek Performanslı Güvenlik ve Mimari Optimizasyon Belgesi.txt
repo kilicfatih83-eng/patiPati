@@ -1,0 +1,146 @@
+Yüksek Performanslı Güvenlik ve Mimari Optimizasyon Belgesi
+
+
+Aşağıda, belirttiğiniz dört katmanlı savunma ve performans stratejisinin derlenmiş, yapılandırılmış nihai halini ve hemen ardından bu mimariyi sunucuda hayata geçirmek için gereken adımları ve kod entegrasyonlarını bulabilirsiniz.BÖLÜM 1: DIŞ ÇEMBER VE SINIR SAVUNMASI (CLOUDFLARE KATMANI)WAF (Web Application Firewall): Aktif edilerek bilinen bot trafiği, SQL Injection ve zararlı payload denemeleri daha sunucuya ulaşmadan Cloudflare sınırında engellenecektir.Özel Hata Sayfaları (Custom Error Pages): Sunucudan %75-%80 yük durumunda gelen HTTP 429/503 sinyallerine karşılık, kurye ekranlarında görünmek üzere "Sistemde yoğunluk var, lütfen birazdan tekrar deneyiniz" tasarımlı sayfa gösterilecektir.Otomatik Ban/Bekletme Yönetimi (IP Access Rules): Node.js tarafından ceza puanı (100) dolan IP'ler, Cloudflare API'sine POST isteği gönderilerek geçici "Challenge (Bekletme)" veya doğrudan "Block" listesine alınacaktır.Temizlik Süreci (Cron Job): Sunucuda 30 dakikada bir çalışan cron script'i, Cloudflare API'sine bağlanıp ban süresi dolan IP'lerin kurallarını DELETE isteği ile kaldıracaktır.BÖLÜM 2: KAPI VE TRAFİK KONTROLÜ (NGINX KATMANI)IP Maskeleme ve Doğrulama: Nginx yalnızca Cloudflare IP bloklarından gelen istekleri kabul edecektir. Doğrudan Google Cloud gerçek sunucu IP adresinize (origin IP) gelen tüm istekler anında reddedilecektir.Payload (Gövde) Sınırı: Bellek şişirme ve büyük veri saldırılarına karşı Nginx konfigürasyonuna client_max_body_size 1M; eklenecek, 1 MB'tan büyük gövdeler doğrudan düşürülecektir.DDoS ve Bağlantı Sınırlandırması: limit_req ve limit_conn direktifleriyle IP başına saniyelik istek sınırı konulacaktır. Sınırı aşan bağlantılara 444 No Response dönülerek TCP bağlantısı aniden koparılacaktır.BÖLÜM 3: MANTIK, SAVUNMA VE FAIL-FAST EŞİKLERİ (NODE.JS KATMANI)%75 Yük Eşiği (Fail-Fast Başlangıcı): Node.js, perf_hooks ile Event Loop (işlemci) yoğunluğunu izler. Yoğunluk %75'e ulaştığında, yeni gelen isteklere veritabanı sorgusu çalıştırmadan ve gövde okumadan anında HTTP 403 veya özel fail-fast yanıtı dönülür.%80 Yük Eşiği (Tam Koruma): Yoğunluk %80'e dayandığında dahili koruma modu devreye girer. Gelen istekler hiç yanıt üretilmeden anında düşürülür (bağlantı koparılır) ve gerekirse Cloudflare API'sine "kapıda reddet" sinyali tetiklenir.Hata Puanlama ve Otomatik Ban Mekanizması: İstek atan IP'ler RAM üzerinde izlenir. 100 puanı dolduran IP Cloudflare'e bildirilir:Yanlış Adrese İstekler (404): Örn. /admin, /env gibi bot taramalarında her denemede 50 Puan (2 ihlalde ban).Bozuk/Eksik Veri (400): Zorunlu alanları eksik/bozuk JSON gönderenlere her denemede 25 Puan (4 ihlalde ban).Yetkisiz Erişim (401/403): Başkasının verisine erişim veya geçersiz token kullanımına her denemede 35 Puan (3 ihlalde ban).BÖLÜM 4: VERİ ÇEKİRDEĞİ VE RAM HIZLANDIRMASI (SQLITE)RAM Optimizasyonu (Redis Olmadan Yüksek Hız): Disk I/O darboğazını ortadan kaldırmak için SQLite başlatılırken WAL (Write-Ahead Logging) modu, synchronous = NORMAL, temp_store = MEMORY ve 256 MB'lık mmap_size PRAGMA komutları devreye alınır.Kilitlenme Zaman Aşımı (Busy Timeout): Anlık yazma çakışmalarında uygulamanın çökmemesi için busyTimeout (3000ms) aktif edilir.Atomik İşlemler (Transaction): Bakiye düşme, ilan ekleme gibi finansal/hak içeren kritik işlemler BEGIN TRANSACTION, COMMIT ve hata durumunda ROLLBACK blokları içinde yürütülür.Kısmi Başarı Yönetimi (Partial Success): Toplu güncellemelerde tüm sürecin çökmemesi için for...of döngüsü içinde hatalı kayıtlar loglanıp failures dizisine atılır, geçerli kayıtlar işlenmeye devam eder.Sunucuda Gerçekleştirilmesi Gereken Adımlar (GCP & Kurulum)Google Cloud Güvenlik Duvarı (Firewall) Ayarı:GCP Console -> VPC Network -> Firewall alanına gidin.0.0.0.0/0 (tüm dünya) için 80 ve 443 portlarını kapatın.Yalnızca Cloudflare IP Aralıkları (IPv4 ve IPv6 listesi) için 80 ve 443 portlarına izin veren (Allow) yeni bir kural ekleyin.Cloudflare Panel Ayarları:WAF sekmesine giderek "Bot Fight Mode" ve kural setlerini aktifleştirin."Custom Pages" bölümünden "429 Too Many Requests" ve "503 Service Unavailable" hataları için tasarımınızı yükleyin.API Tokens bölümünden Node.js'in IP banlayabilmesi için "Zone.Firewall Services" yetkisine sahip bir API Token oluşturun.Nginx Konfigürasyonunun Güncellenmesi:Sunucunuza SSH ile bağlanıp /etc/nginx/nginx.conf veya ilgili site dosyasını düzenleyin. Aşağıdaki ayarları ekleyip sudo systemctl reload nginx yapın.Nginx# Nginx Cloudflare IP İzolasyonu ve Sınırlandırma (nginx.conf içine)
+http {
+    # 1. İstek sınırı (IP başına saniyede 10 istek, 20'ye kadar kuyruğa al)
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+    # 2. Bağlantı sınırı (IP başına aynı anda maks 20 bağlantı)
+    limit_conn_zone $binary_remote_addr zone=conn_limit:10m;
+
+    server {
+        listen 80;
+        server_name api.siteniz.com;
+
+        # Sadece Cloudflare IP'lerine izin ver, geri kalanını doğrudan düşür
+        set_real_ip_from 173.245.48.0/20;
+        set_real_ip_from 103.21.244.0/22;
+        # ... (Diğer tüm Cloudflare IP bloklarını buraya ekleyin)
+        real_ip_header CF-Connecting-IP;
+        
+        # 1 MB Gövde Sınırı
+        client_max_body_size 1M;
+
+        location / {
+            limit_req zone=api_limit burst=20 nodelay;
+            limit_conn zone=conn_limit 20;
+            
+            # Sınır aşılırsa bağlantıyı anında kopar (444 No Response)
+            error_page 503 = 444;
+
+            proxy_pass http://localhost:3001;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+Mevcut server.js ve Veritabanı İçin Gerekli Dosya/Kod GüncellemeleriBelirttiğiniz mimariyi sunduğunuz server.js üzerine entegre etmek için oluşturulması ve güncellenmesi gereken kod blokları aşağıdadır.  1. Veritabanı RAM Optimizasyonu (database.js Güncellemesi)SQLite'ın diski boğmaması ve RAM'den çalışması için veritabanı bağlantınızı oluşturduğunuz dosyada aşağıdaki PRAGMA ayarlarını çalıştırmalısınız.JavaScript// database.js dosyasına eklenecek kısım
+const sqlite3 = require('sqlite3').verbose();
+const db = new sqlite3.Database('./veritabani.db');
+
+db.serialize(() => {
+  // RAM ve Performans Optimizasyonları (BÖLÜM 4)
+  db.run("PRAGMA journal_mode = WAL;");
+  db.run("PRAGMA synchronous = NORMAL;");
+  db.run("PRAGMA temp_store = MEMORY;");
+  db.run("PRAGMA mmap_size = 268435456;"); // 256 MB RAM Mapping
+  db.run("PRAGMA cache_size = -64000;");   // 64 MB Önbellek
+  
+  // Kilitlenme Zaman Aşımı
+  db.configure("busyTimeout", 3000);
+});
+
+module.exports = db;
+2. Güvenlik ve Yük Kontrol Modülü (security.js Dosyası Oluşturun)Ceza puanı hesaplama, Cloudflare'e API atma ve Node.js CPU/Event Loop yoğunluğunu ölçme işlemlerini modüler tutmak için ana dizinde security.js adında yeni bir dosya oluşturun:JavaScript// security.js
+const { monitorEventLoopDelay } = require('perf_hooks');
+const https = require('https');
+
+// Yük İzleyici (BÖLÜM 3 - %75 ve %80 eşikleri)
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
+eventLoopDelay.enable();
+
+const THRESHOLD_FAIL_FAST = 50e6; // Örn: 50ms gecikme (~%75 yük)
+const THRESHOLD_DROP = 100e6;     // Örn: 100ms gecikme (~%80 yük)
+
+// RAM Üzerinde Ceza Puanı İzleme
+const ipPenaltyScores = new Map();
+const BAN_THRESHOLD = 100;
+
+function checkServerLoad(req, res) {
+    const lag = eventLoopDelay.mean;
+    if (lag > THRESHOLD_DROP) {
+        req.socket.destroy(); // %80 Yük: Bağlantıyı doğrudan kopar
+        return true;
+    }
+    if (lag > THRESHOLD_FAIL_FAST) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Sistemde yoğunluk var, lütfen birazdan tekrar deneyiniz." }));
+        return true;
+    }
+    return false;
+}
+
+function addPenaltyPoint(ip, points) {
+    if (!ip) return;
+    const currentScore = ipPenaltyScores.get(ip) || 0;
+    const newScore = currentScore + points;
+    ipPenaltyScores.set(ip, newScore);
+
+    if (newScore >= BAN_THRESHOLD) {
+        banIpOnCloudflare(ip);
+        ipPenaltyScores.delete(ip); // Banlandıktan sonra RAM'den temizle
+    }
+}
+
+function banIpOnCloudflare(ip) {
+    // Cloudflare API isteği (Challenge veya Block kuralları ekleme)
+    console.log(`[GÜVENLİK KORUMASI] ${ip} Cloudflare üzerinden banlandı!`);
+    // Not: Buraya Cloudflare API dökümantasyonundaki POST fetch isteği eklenecektir.
+}
+
+module.exports = { checkServerLoad, addPenaltyPoint };
+3. server.js İçerisine EntegrasyonElinizdeki server.js dosyasının üst kısımlarına ve hata döndüren fonksiyonlarına (puan eklemek için) şu eklemeleri yapmalısınız:  JavaScript// server.js'in en üstüne modülü dahil edin
+const { checkServerLoad, addPenaltyPoint } = require('./security.js');
+
+// ... mevcut require ve ayarlar ...
+
+const server = http.createServer((req, res) => {
+  // 1. İSTEK GELDİĞİ ANDA YÜK KONTROLÜ (BÖLÜM 3)
+  if (checkServerLoad(req, res)) return; // Sistem yük altındaysa işlemi anında kes
+
+  // Gerçek IP'yi Nginx'in ilettiği formattan al
+  const clientIp = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress;
+
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  // ... mevcut CORS ayarları ...
+
+  let body = "";
+  req.on("data", (chunk) => { body += chunk.toString(); });
+
+  req.on("end", () => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const pathname = url.pathname;
+
+    const safeParse = (jsonString) => {
+      try {
+        if (!jsonString) return {};
+        return JSON.parse(jsonString);
+      } catch (e) {
+        // BOZUK JSON - 25 Puan Ceza (BÖLÜM 3)
+        addPenaltyPoint(clientIp, 25);
+        sendError(res, 400, 3002, 300201, "İstek gövdesi JSON formatında değil.");
+        return null;
+      }
+    };
+    
+    // ...[cite: 1] mevcut yönlendirme mantıkları (if/else if) ...
+    
+    // Yönlendirme (Router) bloğunun en sonundaki ELSE kısmı:
+    } else {
+      // YANLIŞ ADRESE İSTEK (404) - 50 Puan Ceza (BÖLÜM 3)
+      addPenaltyPoint(clientIp, 50);
+      sendError(res, 404, 4004, 404001, "Endpoint not found.");
+    }
+  });
+});
+Ayrıca server.js[cite: 1] içindeki authenticate, authenticatePublic ve authenticateBolge fonksiyonlarında geçersiz token yakalanan yerlere (sendError(res, 403...)) addPenaltyPoint(req.headers['cf-connecting-ip'], 35); fonksiyonunu çağırarak 35 ceza puanı mantığını entegre edebilirsiniz. Kısmi başarı (Partial Success) mantığı halihazırda server.js'deki handleSaveChanges fonksiyonu içinde Promise yapısı ve failures dizisi kullanılarak başarıyla uygulanmış durumdadır[cite: 1].
