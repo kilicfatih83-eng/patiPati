@@ -12,6 +12,25 @@ const db = new sqlite3.Database("database.sqlite", (err) => {
 
 function setupDatabase() {
     db.serialize(() => {
+        // --- BÖLÜM 4: SQLITE RAM VE WAL OPTİMİZASYONLARI ---
+        db.run("PRAGMA journal_mode = WAL;");
+        db.run("PRAGMA synchronous = NORMAL;");
+        db.run("PRAGMA temp_store = MEMORY;");
+        db.run("PRAGMA mmap_size = 268435456;"); // 256 MB RAM Mapping
+        db.run("PRAGMA cache_size = -64000;");   // 64 MB Önbellek
+
+        // Eşzamanlı kilitlenme zaman aşımı
+        db.configure("busyTimeout", 3000);
+
+        // --- VERİTABANI İNDEKS LERİ (SEARCH & JOIN OPTİMİZASYONLARI) ---
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_durum_bolge ON ilanTablo(durum, bolgeId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_tur ON ilanTablo(hayvanTuru);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_ilan_kullanici ON ilanTablo(kullaniciId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_talip_ilan ON talipTablo(ilanId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_talip_kullanici ON talipTablo(talipId);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_kullanici_telefon ON kullaniciTablo(telefon);");
+        db.run("CREATE INDEX IF NOT EXISTS idx_yon_isim ON yonTablo(isim);");
+
         // 1. Create yonTablo (Admin users)
         db.run(`
             CREATE TABLE IF NOT EXISTS yonTablo (

@@ -11,7 +11,7 @@ Referans Belgeler: .clinerules, ekosistemv2.txt, ekosistemDestek.txt, Yüksek Pe
 Bu belge; projemizin mevcut Node.js/SQLite backend (`server`) ve Angular frontend (`public-app`, `admin-app`, `bolge-app`) mimarisini inceleyerek;
 - Kodlardaki eksiklik, hata, performans ve güvenlik açıklarını saptar,
 - Yüksek Performanslı Güvenlik ve Mimari Optimizasyon Belgesi'nde tanımlanan 4 katmanlı koruma sistemini (Cloudflare, Nginx, Node.js Fail-Fast, SQLite RAM/WAL) projeye tam olarak entegre eder,
-- Ücretli hosting/domain satın almadan, geçici domain (DuckDNS / Cloudflare Free Domain veya Cloudflare Tunnel) üzerinden prodüksiyon kalitesinde yayınlama mimarisini adım adım ve en ince ayrıntısına kadar açıklar.
+- Ücretli hosting/domain satın almadan, geçici domain (DuckDNS / Cloudflare Free Domain veya Cloudflare Tunnel) üzerinden prodüksiyon kalitesinde yayınlama mimarisini adım adım ve en ince ayrıntısına kadar açıkllar.
 
 --------------------------------------------------------------------------------
 2. MEVCUT KODLARIN DETAYLI İNCELEMESİ, EKSİKLER VE DÜZELTİLECEK YERLER
@@ -494,6 +494,76 @@ Bu dokümanda sunulan tüm adımlar uygulandığında;
 2. Bot taramaları ve saldırılar Cloudflare ve Nginx sınırında durdurulur.
 3. Sunucu yüksek yük altında (%75-%80) çökmek yerine Fail-Fast yanıtıyla kendisini korumaya alır.
 4. Hiçbir harici ücret ödemeden geçici domain üzerinden tam güvenlikle canlı yayın gerçekleştirilir.
+
+--------------------------------------------------------------------------------
+19-9 KODLAMA VE YÜKLEME AŞAMASI İÇİN BİREBİR HAZIRLIK, KULLANIM VE REHBER DOSYASI
+--------------------------------------------------------------------------------
+
+AŞAĞIDAKİ ADIMLAR, BİZZAT YÜKLEME VE KURULUM AŞAMASINDA NE NEYİ, NEREYE, NASIL VE NEDEN YAPACAĞINIZI ADIM ADIM AÇIKLAMAKTA DİR:
+
+1. DİZİN VE DOSYA OLUŞTURMA/GÜNCELLEME LİSTESİ:
+
+   a) `server/security.js` (YENİ DOSYA OLUŞTURULACAK)
+      - Nereye: `server/` klasörü altına.
+      - Neden: Event Loop gecikme izlemesi (%75 ve %80 yük eşikleri), RAM üstünde IP ceza puanı takibi (404, 400, 401/403 puanları) ve Cloudflare API ban tetikleyicisi için.
+      - Nasıl: `write_file` ile oluşturulup `server.js` tarafından `require('./security.js')` şeklinde içe aktarılacak.
+
+   b) `server/cf-cleanup.js` (YENİ DOSYA OLUŞTURULACAK)
+      - Nereye: `server/` klasörü altına.
+      - Neden: Cloudflare tarafında 100 ceza puanını doldurup banlanan IP'lerin 30 dakika sonra otomatik olarak engelini kaldırmak için.
+      - Nasıl: Sunucu üzerinde Cron Job (`crontab -e`) ile 30 dakikada bir çalıştırılacak.
+
+   c) `server/.env` (YENİ DOSYA OLUŞTURULACAK)
+      - Nereye: `server/` klasörü altına.
+      - Neden: JWT secret şifrelerini, Cloudflare API Token ve Zone ID anahtarlarını kod içerisinden çıkarıp güvenli ortam değişkeni olarak saklamak için.
+      - Nasıl: `dotenv` paketi yüklenip `require('dotenv').config()` ile sunucu başlangıcında okunacak.
+
+   d) `server/database.js` (MEVCUT DOSYA GÜNCELLEMESİ)
+      - Nereye: `server/database.js` dosyası.
+      - Neden: SQLite WAL modu, RAM temp store, mmap_size, cache_size, busyTimeout ve tablo indekslerini (idx_ilan_durum_bolge, idx_ilan_tur, idx_ilan_kullanici, idx_talip_ilan vb.) eklemek için.
+      - Nasıl: `setupDatabase()` fonksiyonunun girişinde PRAGMA ve `CREATE INDEX IF NOT EXISTS` komutları çalıştırılacak.
+
+   e) `server/server.js` (MEVCUT DOSYA GÜNCELLEMESİ)
+      - Nereye: `server/server.js` dosyası.
+      - Neden: Gelen her istekte `checkServerLoad(req, res)` yük kontrolünü çalıştırmak, IP adresini `CF-Connecting-IP` başlığından okumak, hatalı/yetkisiz durumlarda `addPenaltyPoint` çağırmak ve JWT secret'ları `.env` üzerinden almak için.
+      - Nasıl: `server.js` dosyasının en üstüne security ve dotenv import edilerek router ve middleware bloklarında gerekli ceza puanı çağrıları yerleştirilecek.
+
+   f) Nginx Konfigürasyonu (SUNUCU DOSYASI)
+      - Nereye: GCP Sunucusundaki `/etc/nginx/sites-available/default` (veya `nginx.conf`).
+      - Neden: Origin IP gizleme (sadece Cloudflare IP geçişi), IP başına rate limit (10 req/s), 1MB body limit ve Angular frontend statik dosyalarının sunumu için.
+      - Nasıl: Nginx konfigürasyon dosyasına yazılıp `sudo nginx -t` ve `sudo systemctl reload nginx` yapılacak.
+
+2. KULLANICININ YÜKLEME İŞLEMLERİ SIRASINDA NE YAPACAĞI (ADIM ADIM REHBER):
+
+   - Adım 1: `.clinerules` kuralı gereğince source code üzerinde doğrudan değişiklik yapılması için sohbet ekranından `!!!! KOD YAZ` talimatı verilir.
+   - Adım 2: `server` dizininde `npm install dotenv` komutu çalıştırılarak ortam değişkenleri kütüphanesi yüklenir.
+   - Adım 3: `server/.env` dosyası açılarak `CF_ZONE_ID` ve `CF_API_TOKEN` değerleri gerçek Cloudflare paneli bilgileriyle doldurulur.
+   - Adım 4: GCP Firewall ekranından 80 ve 443 portları sadece Cloudflare IPv4/IPv6 IP bloklarına açılır.
+   - Adım 5: DuckDNS / Cloudflare DNS panelinden geçici domain (örn: `projeniz.duckdns.org`) GCP statik IP'sine A kaydı olarak eklenir ve Proxy (Turuncu Bulut) aktif edilir.
+   - Adım 6: Angular frontend projeleri (`public-app`, `admin-app`, `bolge-app`) `npm run build -- --configuration production` ile derlenip `dist/` çıktıları sunucudaki `/var/www/` dizinlerine yüklenir.
+   - Adım 7: PM2 servisi başlatılır: `pm2 start server/server.js --name "ekosistem-api"` ve `pm2 save`.
+
+--------------------------------------------------------------------------------
+19-9 YAPILAN KOD DEĞİŞİKLİKLERİ VE KULLANICI REHBERİ (TAMAMLANDI)
+--------------------------------------------------------------------------------
+
+TÜM GELİŞTİRMELER, GÜVENLİK KORUMALARI VE PERFORMANS FİX'LERİ KOD TABANINA İŞLENMİŞTİR:
+
+1. GERÇEKLEŞTİRİLEN KOD VE DOSYA DEĞİŞİKLİKLERİ:
+   [X] `server/package.json`: `dotenv` bağımlılığı projeye eklendi ve kuruldu.
+   [X] `server/security.js`: Event Loop izleme (monitorEventLoopDelay), Fail-Fast (%75 ve %80 yük koruması), RAM ceza puanı yönetimi ve Cloudflare API IP ban modülü sıfırdan oluşturuldu.
+   [X] `server/cf-cleanup.js`: 30 dakikada bir Cloudflare ban listesini tarayıp süresi dolan banları temizleyen script oluşturuldu.
+   [X] `server/.env`: JWT ve Cloudflare API değişkenleri için konfigürasyon dosyası eklendi.
+   [X] `server/database.js`: SQLite WAL modu (`PRAGMA journal_mode = WAL`), `synchronous = NORMAL`, `temp_store = MEMORY`, `mmap_size` (256MB), `cache_size` (64MB), `busyTimeout` (3000ms) ve tüm arama/join indeksleri (`idx_ilan_durum_bolge`, `idx_ilan_tur`, `idx_ilan_kullanici`, `idx_talip_ilan`, `idx_talip_kullanici`, `idx_kullanici_telefon`, `idx_yon_isim`) eklendi.
+   [X] `server/server.js`: `dotenv` ve `security.js` import edildi. Yük kontrolü (`checkServerLoad`), `CF-Connecting-IP` üzerinden gerçek IP tespiti, 400 bad JSON (25 puan), 404 endpoint (50 puan), 401/403 yetkisiz erişim (35 puan) ceza skorları entegre edildi. JWT gizli anahtarları `.env` değişkenlerine bağlandı.
+
+2. KULLANICININ YÜKLEME VE CANLIYA ALMA AŞAMASINDA YAPACAĞI İŞLEMLER:
+   - Adım 1: `server/.env` dosyasındaki `CF_ZONE_ID` ve `CF_API_TOKEN` değişkenlerini kendi Cloudflare API panelinizden alacağınız anahtarlarla güncelleyin.
+   - Adım 2: GCP Firewall ekranınızda (VPC Network -> Firewall) 80 ve 443 portlarını sadece Cloudflare IP bloklarına izin verecek şekilde sınırlayın.
+   - Adım 3: DuckDNS veya Cloudflare paneli üzerinden geçici domaininizi (örn: `projeniz.duckdns.org`) sunucu IP adresinize yönlendirin ve Turuncu Bulut (Proxy) modunu açın.
+   - Adım 4: Nginx dosyanıza (`/etc/nginx/sites-available/default`) yolaHazır.txt dosyasında verilen Nginx konfigürasyonunu ekleyip `sudo systemctl reload nginx` yapın.
+   - Adım 5: Sunucunuzda PM2 ile backend'i çalıştırın: `pm2 start server/server.js --name "ekosistem-api"` ve `pm2 save`.
+   - Adım 6: Ban temizleme script'i için crontab kaydı ekleyin: `*/30 * * * * /usr/bin/node /path/to/server/cf-cleanup.js`.
 
 ================================================================================
 ================================================================================
