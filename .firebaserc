@@ -1,0 +1,20 @@
+{
+  "projects": {
+    "default": "your-firebase-project-id"
+  },
+  "targets": {
+    "your-firebase-project-id": {
+      "hosting": {
+        "public-app": [
+          "public-app-site"
+        ],
+        "admin-app": [
+          "admin-app-site"
+        ],
+        "bolge-app": [
+          "bolge-app-site"
+        ]
+      }
+    }
+  }
+}
