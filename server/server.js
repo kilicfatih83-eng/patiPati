@@ -11,6 +11,11 @@ const JWT_PUBLIC_SECRET = process.env.JWT_PUBLIC_SECRET || "another_secret_for_p
 const JWT_BOLGE_SECRET = process.env.JWT_BOLGE_SECRET || "a_third_secret_for_bolge_app";
 const SMS_SECRET_KEY = process.env.SMS_SECRET_KEY || "SUPER_GIZLI_ANAHTAR";
 
+// Dynamic CORS configuration
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || "*")
+  .split(",")
+  .map(o => o.trim());
+
 // Helper function for consistent error responses
 function sendError(res, httpStatus, errorCode, subCode, message, details = {}) {
   res.writeHead(httpStatus, { "Content-Type": "application/json" });
@@ -49,8 +54,17 @@ const server = http.createServer((req, res) => {
   // Gerçek IP'yi Nginx'in/Cloudflare'in ilettiği formattan al
   const clientIp = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress;
 
-  const allowedOrigin = process.env.ALLOWED_ORIGIN || "*";
-  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+  // Dynamic CORS Handling for Firebase Hosting & Cloudflare Domains
+  const reqOrigin = req.headers.origin;
+  if (allowedOrigins.includes("*") || !reqOrigin) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (allowedOrigins.includes(reqOrigin)) {
+    res.setHeader("Access-Control-Allow-Origin", reqOrigin);
+  } else {
+    // If not explicitly matched, reflect first configured origin or wildcard
+    res.setHeader("Access-Control-Allow-Origin", allowedOrigins[0] || "*");
+  }
+
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Secret-Key");
 
@@ -71,7 +85,7 @@ const server = http.createServer((req, res) => {
 
     const safeParse = (jsonString) => {
       try {
-        if (!jsonString) return {};
+        if (!jsonString || !jsonString.trim()) return {};
         return JSON.parse(jsonString);
       } catch (e) {
         // BOZUK JSON - 25 Puan Ceza (BÖLÜM 3)
@@ -86,6 +100,7 @@ const server = http.createServer((req, res) => {
       return; // Stop processing if JSON is malformed
     }
 
+    const safeBody = parsedBody || {};
     const id = pathname.split("/")[3];
 
     // --- ROUTER ---
@@ -93,23 +108,23 @@ const server = http.createServer((req, res) => {
 
     // Admin Routes
     if (pathname === "/login" && req.method === "POST") {
-      handleLogin(req, res, parsedBody, clientIp);
+      handleLogin(req, res, safeBody, clientIp);
     } else if (pathname === "/api/getYon" && req.method === "GET") {
       authenticate(req, res, clientIp, () => handleGetYon(req, res));
     } else if (pathname === "/api/save-changes" && req.method === "POST") {
-      authenticate(req, res, clientIp, () => handleSaveChanges(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleSaveChanges(req, res, safeBody));
       // Admin User Management Routes
     } else if (pathname === "/api/kullanicilar" && req.method === "GET") {
       authenticate(req, res, clientIp, () => handleGetKullanicilar(req, res));
     } else if (pathname === "/api/kullanicilar/update-status" && req.method === "POST") {
-      authenticate(req, res, clientIp, () => handleUpdateKullaniciStatus(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleUpdateKullaniciStatus(req, res, safeBody));
     } else if (pathname === "/api/kullanicilar/register" && req.method === "POST") {
-      authenticate(req, res, clientIp, () => handleRegisterKullanici(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleRegisterKullanici(req, res, safeBody));
 
     }
     // Public App Routes
     else if (pathname === "/api/public/login" && req.method === "POST") {
-      handlePublicLogin(req, res, parsedBody, clientIp);
+      handlePublicLogin(req, res, safeBody, clientIp);
     } else if (pathname === "/api/bolgeler" && req.method === "GET") {
       handleGetBolgeler(req, res);
     } else if (pathname === "/api/ilanlar" && req.method === "GET") {
@@ -117,11 +132,11 @@ const server = http.createServer((req, res) => {
     } else if (pathname.startsWith("/api/ilanlar/") && req.method === "GET") {
       handleIlanDetayFull(req, res, id);
     } else if (pathname === "/api/ilanlar" && req.method === "POST") {
-      authenticatePublic(req, res, clientIp, () => handleCreateIlan(req, res, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleCreateIlan(req, res, safeBody));
     } else if (pathname.endsWith("/talip-ol") && req.method === "POST") {
-      authenticatePublic(req, res, clientIp, () => handleTalipOl(req, res, id, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleTalipOl(req, res, id, safeBody));
     } else if (pathname === "/api/mesaj" && req.method === "POST") {
-      authenticatePublic(req, res, clientIp, () => handleMesaj(req, res, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleMesaj(req, res, safeBody));
     } else if (pathname === "/api/my-ads" && req.method === "GET") {
       authenticatePublic(req, res, clientIp, () => handleMyAds(req, res));
     } else if (pathname === "/api/my-applications" && req.method === "GET") {
@@ -146,19 +161,19 @@ const server = http.createServer((req, res) => {
     else if (pathname === "/api/bolge/ilanlar" && req.method === "GET") {
       authenticateBolge(req, res, clientIp, () => handleGetBolgeIlanlar(req, res, url.searchParams));
     } else if (pathname === "/api/bolge/ilan-durum-guncelle" && req.method === "POST") {
-      authenticateBolge(req, res, clientIp, () => handleUpdateIlanDurum(req, res, parsedBody));
+      authenticateBolge(req, res, clientIp, () => handleUpdateIlanDurum(req, res, safeBody));
     } else if (pathname.startsWith("/api/bolge/ilan-detay/") && req.method === "GET") {
       authenticateBolge(req, res, clientIp, () => handleGetBolgeIlanDetay(req, res, id));
     } else if (pathname === "/api/bolge/talipler" && req.method === "GET") {
       authenticateBolge(req, res, clientIp, () => handleGetBolgeTalipler(req, res, url.searchParams));
     } else if (pathname === "/api/bolge/talip-durum-guncelle" && req.method === "POST") {
-      authenticateBolge(req, res, clientIp, () => handleUpdateTalipDurum(req, res, parsedBody));
+      authenticateBolge(req, res, clientIp, () => handleUpdateTalipDurum(req, res, safeBody));
     } else if (pathname === "/api/bolge/mesajlar" && req.method === "GET") {
       authenticateBolge(req, res, clientIp, () => handleGetBolgeMesajlar(req, res));
     }
     // Other Routes
     else if (pathname === "/api/sms-handler" && req.method === "POST") {
-      handleSmsRequest(req, res, parsedBody, body, clientIp);
+      handleSmsRequest(req, res, safeBody, body, clientIp);
     } else {
       // YANLIŞ ADRESE İSTEK (404) - 50 Puan Ceza (BÖLÜM 3)
       addPenaltyPoint(clientIp, 50);
@@ -170,8 +185,13 @@ const server = http.createServer((req, res) => {
 
 // --- HANDLERS ---
 
-function handleLogin(req, res, body, clientIp) {
+function handleLogin(req, res, body = {}, clientIp) {
   const { isim, sifre } = body;
+  if (!isim || !sifre) {
+    addPenaltyPoint(clientIp, 25);
+    return sendError(res, 400, 1101, 110100, "Kullanıcı adı ve şifre zorunludur.");
+  }
+
   db.get("SELECT * FROM yonTablo WHERE isim = ?", [isim], (err, user) => {
     if (err) return sendError(res, 500, 5000, 500001, "Database error while finding user.");
     if (!user) {
@@ -210,7 +230,7 @@ function handleLogin(req, res, body, clientIp) {
   });
 }
 
-function handlePublicLogin(req, res, body, clientIp) {
+function handlePublicLogin(req, res, body = {}, clientIp) {
   const normalizedPhone = normalizePhoneNumber(body.isim);
   if (!normalizedPhone) {
     addPenaltyPoint(clientIp, 25);
@@ -218,6 +238,11 @@ function handlePublicLogin(req, res, body, clientIp) {
   }
 
   const { sifre } = body;
+  if (!sifre) {
+    addPenaltyPoint(clientIp, 25);
+    return sendError(res, 400, 1101, 110100, "Şifre zorunludur.");
+  }
+
   db.get("SELECT id, isim, sifre, telefon, mail, yayinHakki, durum FROM kullaniciTablo WHERE telefon = ?", [normalizedPhone], (err, user) => {
     if (err) return sendError(res, 500, 5000, 500001, "Kullanıcı aranırken veritabanı hatası.");
     if (!user) {
@@ -252,7 +277,7 @@ function handleGetYon(req, res) {
   });
 }
 
-function handleSaveChanges(req, res, body) {
+function handleSaveChanges(req, res, body = {}) {
   const { updates = [], inserts = [], deletes = [] } = body;
   const failures = [];
   let completed = 0;
@@ -419,7 +444,7 @@ function handleSaveChanges(req, res, body) {
 }
 
 
-function handleCreateIlan(req, res, body) {
+function handleCreateIlan(req, res, body = {}) {
   const userId = req.user.id;
   db.run("UPDATE kullaniciTablo SET yayinHakki = yayinHakki - 1 WHERE id = ? AND yayinHakki > 0", [userId], function (err) {
     if (err) return sendError(res, 500, 5000, 500005, "DB error updating yayinHakki.");
@@ -453,7 +478,7 @@ function handleCreateIlan(req, res, body) {
   });
 }
 
-function handleTalipOl(req, res, ilanId, body) {
+function handleTalipOl(req, res, ilanId, body = {}) {
   const talipId = req.user.id;
   db.get("SELECT kullaniciId, bolgeId, hayvanTuru FROM ilanTablo WHERE id = ?", [ilanId], (err, ilan) => {
     if (err) return sendError(res, 500, 5000, 500006, "DB error finding ilan.");
@@ -482,7 +507,7 @@ function handleTalipOl(req, res, ilanId, body) {
   });
 }
 
-function handleMesaj(req, res, body) {
+function handleMesaj(req, res, body = {}) {
   const userId = req.user.id;
   const { talipId, mesaj } = body;
 
@@ -657,7 +682,7 @@ function handleGetIlanlar(req, res, params) {
   });
 }
 
-function handleSmsRequest(req, res, parsedBody, rawBody, clientIp) {
+function handleSmsRequest(req, res, parsedBody = {}, rawBody, clientIp) {
   const authHeader = req.headers['x-secret-key'];
   if (authHeader !== SMS_SECRET_KEY) {
     addPenaltyPoint(clientIp, 35);
@@ -772,7 +797,7 @@ function handleGetBolgeIlanlar(req, res, params) {
   });
 }
 
-function handleUpdateIlanDurum(req, res, body) {
+function handleUpdateIlanDurum(req, res, body = {}) {
   const { updates } = body;
   const user = req.user;
   const failures = [];
@@ -846,7 +871,7 @@ function handleGetBolgeTalipler(req, res, params) {
   });
 }
 
-function handleUpdateTalipDurum(req, res, body) {
+function handleUpdateTalipDurum(req, res, body = {}) {
   const { updates } = body;
   const user = req.user;
   const failures = [];
@@ -1000,7 +1025,7 @@ function handleGetKullanicilar(req, res) {
   });
 }
 
-function handleUpdateKullaniciStatus(req, res, body) {
+function handleUpdateKullaniciStatus(req, res, body = {}) {
   if (req.user.adm !== 1) {
     return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
   }
@@ -1041,7 +1066,7 @@ function handleUpdateKullaniciStatus(req, res, body) {
   });
 }
 
-async function handleRegisterKullanici(req, res, body) {
+async function handleRegisterKullanici(req, res, body = {}) {
   if (req.user.adm !== 1) {
     return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
   }
