@@ -1,13 +1,15 @@
+require('dotenv').config();
 const http = require("http");
 const db = require("./database.js");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { URLSearchParams } = require("url");
+const { checkServerLoad, addPenaltyPoint } = require('./security.js');
 
-const JWT_SECRET = "your_jwt_secret"; // For admin app
-const JWT_PUBLIC_SECRET = "another_secret_for_public_app"; // For public app
-const JWT_BOLGE_SECRET = "a_third_secret_for_bolge_app"; // For bolge app
-const SMS_SECRET_KEY = "SUPER_GIZLI_ANAHTAR"; // For SMS forwarder app
+const JWT_SECRET = process.env.JWT_SECRET || "your_jwt_secret";
+const JWT_PUBLIC_SECRET = process.env.JWT_PUBLIC_SECRET || "another_secret_for_public_app";
+const JWT_BOLGE_SECRET = process.env.JWT_BOLGE_SECRET || "a_third_secret_for_bolge_app";
+const SMS_SECRET_KEY = process.env.SMS_SECRET_KEY || "SUPER_GIZLI_ANAHTAR";
 
 // Helper function for consistent error responses
 function sendError(res, httpStatus, errorCode, subCode, message, details = {}) {
@@ -41,7 +43,14 @@ function handleGetBolgeler(req, res) {
 
 
 const server = http.createServer((req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  // 1. İSTEK GELDİĞİ ANDA YÜK KONTROLÜ (BÖLÜM 3)
+  if (checkServerLoad(req, res)) return; // Sistem yük altındaysa işlemi anında kes
+
+  // Gerçek IP'yi Nginx'in/Cloudflare'in ilettiği formattan al
+  const clientIp = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress;
+
+  const allowedOrigin = process.env.ALLOWED_ORIGIN || "*";
+  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Secret-Key");
 
@@ -65,6 +74,8 @@ const server = http.createServer((req, res) => {
         if (!jsonString) return {};
         return JSON.parse(jsonString);
       } catch (e) {
+        // BOZUK JSON - 25 Puan Ceza (BÖLÜM 3)
+        addPenaltyPoint(clientIp, 25);
         sendError(res, 400, 3002, 300201, "İstek gövdesi JSON formatında değil.");
         return null;
       }
@@ -82,23 +93,23 @@ const server = http.createServer((req, res) => {
 
     // Admin Routes
     if (pathname === "/login" && req.method === "POST") {
-      handleLogin(req, res, parsedBody);
+      handleLogin(req, res, parsedBody, clientIp);
     } else if (pathname === "/api/getYon" && req.method === "GET") {
-      authenticate(req, res, () => handleGetYon(req, res));
+      authenticate(req, res, clientIp, () => handleGetYon(req, res));
     } else if (pathname === "/api/save-changes" && req.method === "POST") {
-      authenticate(req, res, () => handleSaveChanges(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleSaveChanges(req, res, parsedBody));
       // Admin User Management Routes
     } else if (pathname === "/api/kullanicilar" && req.method === "GET") {
-      authenticate(req, res, () => handleGetKullanicilar(req, res));
+      authenticate(req, res, clientIp, () => handleGetKullanicilar(req, res));
     } else if (pathname === "/api/kullanicilar/update-status" && req.method === "POST") {
-      authenticate(req, res, () => handleUpdateKullaniciStatus(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleUpdateKullaniciStatus(req, res, parsedBody));
     } else if (pathname === "/api/kullanicilar/register" && req.method === "POST") {
-      authenticate(req, res, () => handleRegisterKullanici(req, res, parsedBody));
+      authenticate(req, res, clientIp, () => handleRegisterKullanici(req, res, parsedBody));
 
     }
     // Public App Routes
     else if (pathname === "/api/public/login" && req.method === "POST") {
-      handlePublicLogin(req, res, parsedBody);
+      handlePublicLogin(req, res, parsedBody, clientIp);
     } else if (pathname === "/api/bolgeler" && req.method === "GET") {
       handleGetBolgeler(req, res);
     } else if (pathname === "/api/ilanlar" && req.method === "GET") {
@@ -106,49 +117,51 @@ const server = http.createServer((req, res) => {
     } else if (pathname.startsWith("/api/ilanlar/") && req.method === "GET") {
       handleIlanDetayFull(req, res, id);
     } else if (pathname === "/api/ilanlar" && req.method === "POST") {
-      authenticatePublic(req, res, () => handleCreateIlan(req, res, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleCreateIlan(req, res, parsedBody));
     } else if (pathname.endsWith("/talip-ol") && req.method === "POST") {
-      authenticatePublic(req, res, () => handleTalipOl(req, res, id, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleTalipOl(req, res, id, parsedBody));
     } else if (pathname === "/api/mesaj" && req.method === "POST") {
-      authenticatePublic(req, res, () => handleMesaj(req, res, parsedBody));
+      authenticatePublic(req, res, clientIp, () => handleMesaj(req, res, parsedBody));
     } else if (pathname === "/api/my-ads" && req.method === "GET") {
-      authenticatePublic(req, res, () => handleMyAds(req, res));
+      authenticatePublic(req, res, clientIp, () => handleMyAds(req, res));
     } else if (pathname === "/api/my-applications" && req.method === "GET") {
-      authenticatePublic(req, res, () => handleMyApplications(req, res));
+      authenticatePublic(req, res, clientIp, () => handleMyApplications(req, res));
     } else if (pathname === "/api/my-ads-applicants" && req.method === "GET") {
-      authenticatePublic(req, res, () => handleMyAdsApplicants(req, res));
+      authenticatePublic(req, res, clientIp, () => handleMyAdsApplicants(req, res));
     } else if (pathname.startsWith("/api/talep-detay-full/") && req.method === "GET") {
-      authenticatePublic(req, res, () => handleTalepDetayFull(req, res, id));
+      authenticatePublic(req, res, clientIp, () => handleTalepDetayFull(req, res, id));
     } else if (pathname.startsWith("/api/talep-detay-kisitli/") && req.method === "GET") {
-      authenticatePublic(req, res, () => handleTalepDetayKisitli(req, res, id));
+      authenticatePublic(req, res, clientIp, () => handleTalepDetayKisitli(req, res, id));
     } else if (pathname.startsWith("/api/ilan-detay-full/") && req.method === "GET") {
       handleIlanDetayFull(req, res, id);
     } else if (pathname.startsWith("/api/my-ad-detay-full/") && req.method === "GET") {
-      authenticatePublic(req, res, () => handleMyAdDetayFull(req, res, id));
+      authenticatePublic(req, res, clientIp, () => handleMyAdDetayFull(req, res, id));
     } else if (pathname.startsWith("/api/my-ad-detay-kisitli/") && req.method === "GET") {
-      authenticatePublic(req, res, () => handleMyAdDetayKisitli(req, res, id));
+      authenticatePublic(req, res, clientIp, () => handleMyAdDetayKisitli(req, res, id));
     } else if (pathname === "/api/me/yayin-hakki" && req.method === "GET") {
-      authenticatePublic(req, res, () => handleGetMyYayinHakki(req, res));
+      authenticatePublic(req, res, clientIp, () => handleGetMyYayinHakki(req, res));
     }
 
     // Bolge App Routes
     else if (pathname === "/api/bolge/ilanlar" && req.method === "GET") {
-      authenticateBolge(req, res, () => handleGetBolgeIlanlar(req, res, url.searchParams));
+      authenticateBolge(req, res, clientIp, () => handleGetBolgeIlanlar(req, res, url.searchParams));
     } else if (pathname === "/api/bolge/ilan-durum-guncelle" && req.method === "POST") {
-      authenticateBolge(req, res, () => handleUpdateIlanDurum(req, res, parsedBody));
+      authenticateBolge(req, res, clientIp, () => handleUpdateIlanDurum(req, res, parsedBody));
     } else if (pathname.startsWith("/api/bolge/ilan-detay/") && req.method === "GET") {
-      authenticateBolge(req, res, () => handleGetBolgeIlanDetay(req, res, id));
+      authenticateBolge(req, res, clientIp, () => handleGetBolgeIlanDetay(req, res, id));
     } else if (pathname === "/api/bolge/talipler" && req.method === "GET") {
-      authenticateBolge(req, res, () => handleGetBolgeTalipler(req, res, url.searchParams));
+      authenticateBolge(req, res, clientIp, () => handleGetBolgeTalipler(req, res, url.searchParams));
     } else if (pathname === "/api/bolge/talip-durum-guncelle" && req.method === "POST") {
-      authenticateBolge(req, res, () => handleUpdateTalipDurum(req, res, parsedBody));
+      authenticateBolge(req, res, clientIp, () => handleUpdateTalipDurum(req, res, parsedBody));
     } else if (pathname === "/api/bolge/mesajlar" && req.method === "GET") {
-      authenticateBolge(req, res, () => handleGetBolgeMesajlar(req, res));
+      authenticateBolge(req, res, clientIp, () => handleGetBolgeMesajlar(req, res));
     }
     // Other Routes
     else if (pathname === "/api/sms-handler" && req.method === "POST") {
-      handleSmsRequest(req, res, parsedBody, body);
+      handleSmsRequest(req, res, parsedBody, body, clientIp);
     } else {
+      // YANLIŞ ADRESE İSTEK (404) - 50 Puan Ceza (BÖLÜM 3)
+      addPenaltyPoint(clientIp, 50);
       sendError(res, 404, 4004, 404001, "Endpoint not found.");
     }
   });
@@ -157,14 +170,20 @@ const server = http.createServer((req, res) => {
 
 // --- HANDLERS ---
 
-function handleLogin(req, res, body) {
+function handleLogin(req, res, body, clientIp) {
   const { isim, sifre } = body;
   db.get("SELECT * FROM yonTablo WHERE isim = ?", [isim], (err, user) => {
     if (err) return sendError(res, 500, 5000, 500001, "Database error while finding user.");
-    if (!user) return sendError(res, 401, 1101, 110101, "Invalid username or password.");
+    if (!user) {
+      addPenaltyPoint(clientIp, 35);
+      return sendError(res, 401, 1101, 110101, "Invalid username or password.");
+    }
 
     bcrypt.compare(sifre, user.sifre, (err, result) => {
-      if (err || !result) return sendError(res, 401, 1101, 110102, "Invalid username or password.");
+      if (err || !result) {
+        addPenaltyPoint(clientIp, 35);
+        return sendError(res, 401, 1101, 110102, "Invalid username or password.");
+      }
 
       let token;
       let app;
@@ -191,20 +210,27 @@ function handleLogin(req, res, body) {
   });
 }
 
-function handlePublicLogin(req, res, body) {
+function handlePublicLogin(req, res, body, clientIp) {
   const normalizedPhone = normalizePhoneNumber(body.isim);
   if (!normalizedPhone) {
+    addPenaltyPoint(clientIp, 25);
     return sendError(res, 400, 1103, 110301, "Geçersiz telefon formatı. Numarayı 5xx xxx xx xx şeklinde girin.");
   }
 
   const { sifre } = body;
   db.get("SELECT id, isim, sifre, telefon, mail, yayinHakki, durum FROM kullaniciTablo WHERE telefon = ?", [normalizedPhone], (err, user) => {
     if (err) return sendError(res, 500, 5000, 500001, "Kullanıcı aranırken veritabanı hatası.");
-    if (!user) return sendError(res, 401, 1101, 110103, "Bu telefon numarasıyla kayıtlı kullanıcı bulunamadı.");
+    if (!user) {
+      addPenaltyPoint(clientIp, 35);
+      return sendError(res, 401, 1101, 110103, "Bu telefon numarasıyla kayıtlı kullanıcı bulunamadı.");
+    }
     if (user.durum === 0) return sendError(res, 403, 1104, 110401, "Hesabınız yönetici tarafından reddedilmiştir veya askıya alınmıştır.");
 
     bcrypt.compare(sifre, user.sifre, (err, result) => {
-      if (err || !result) return sendError(res, 401, 1101, 110104, "Hatalı şifre.");
+      if (err || !result) {
+        addPenaltyPoint(clientIp, 35);
+        return sendError(res, 401, 1101, 110104, "Hatalı şifre.");
+      }
 
       const token = jwt.sign({ id: user.id, isim: user.isim, telefon: user.telefon }, JWT_PUBLIC_SECRET, { expiresIn: "8h" });
       const { sifre, ...userWithoutPassword } = user;
@@ -240,7 +266,6 @@ function handleSaveChanges(req, res, body) {
           if (err) {
             failures.push({ id, message: err.message, subCode: 500003 });
           } else if (userToDelete && userToDelete.adm === 1) {
-            // ADM KURALI: Hiçbir admin kaydı API üzerinden silinemez (kendi hesabı dahil).
             failures.push({ id, message: "Admin kullanıcılar silinemez. Adm kullanıcı silmeye çalıştıysanız düzeltin.", subCode: 120205 });
           } else {
             db.run("DELETE FROM yonTablo WHERE id = ?", [id], function (err) {
@@ -256,7 +281,6 @@ function handleSaveChanges(req, res, body) {
     // --- UPDATES ---
     for (const update of updates) {
       await new Promise((resolve) => {
-        // Önce hedef kullanıcının mevcut verilerini kontrol et
         db.get("SELECT * FROM yonTablo WHERE id = ?", [update.id], (err, existing) => {
           if (err) {
             failures.push({ id: update.id, message: err.message, subCode: 500003 });
@@ -267,15 +291,12 @@ function handleSaveChanges(req, res, body) {
             return resolve();
           }
 
-          // ADM KURALI 1: Hedef kullanıcı bir admin ise (adm === 1):
           if (existing.adm === 1) {
-            // Başka bir admini değiştirmeye çalışıyorsa engelle
             if (loggedInUser.id !== update.id) {
               failures.push({ id: update.id, message: "Bir admin başka bir adminin bilgilerini değiştiremez. Adm kullanıcı değiştirmeye çalıştıysanız düzeltin.", subCode: 120202 });
               return resolve();
             }
 
-            // Kendi hesabı ise: YALNIZCA ŞİFRE DEĞİŞTİREBİLİR. Başka hiçbir alan değiştirilemez!
             const hasOtherChanges = (
               (update.isim !== undefined && update.isim !== existing.isim) ||
               (update.telefon !== undefined && update.telefon !== (existing.telefon || '')) ||
@@ -297,7 +318,6 @@ function handleSaveChanges(req, res, body) {
               return resolve();
             }
 
-            // Şifre değişikliği var mı?
             if (update.sifre) {
               const hash = bcrypt.hashSync(update.sifre, 10);
               db.run("UPDATE yonTablo SET sifre = ? WHERE id = ?", [hash, update.id], function (err) {
@@ -307,21 +327,17 @@ function handleSaveChanges(req, res, body) {
               });
               return;
             } else {
-              // Şifre verilmemiş ve diğer alanlar da değişmemişse
               completed++;
               return resolve();
             }
           }
 
-          // Normal Yönetici Güncellemesi (adm !== 1 olan kullanıcılar):
-          // ADM KURALI 2: Bir kullanıcıyı admin yapmaya veya adminliğini kaldırmaya çalışma engellenir
           const incomingAdm = update.adm !== undefined ? update.adm : existing.adm;
           if (incomingAdm !== existing.adm) {
             failures.push({ id: update.id, message: "Admin yetkisi doğuştandır, sonradan verilemez veya kaldırılamaz. Adm kullanıcı değiştirmeye çalıştıysanız düzeltin.", subCode: 120203 });
             return resolve();
           }
 
-          // Tüm kontroller geçti — adm değeri DB'den okunan gerçek değer (0) ile sabitlenir
           const safeAdm = existing.adm;
           let query = "UPDATE yonTablo SET isim=?, telefon=?, mail=?, kus=?, kedi=?, kopek=?, adm=?, bolgeId=?, engelli=? WHERE id=?";
           let params = [
@@ -331,7 +347,7 @@ function handleSaveChanges(req, res, body) {
             update.kus || 0,
             update.kedi || 0,
             update.kopek || 0,
-            safeAdm,        // adm her zaman DB'den okunana eşitleniyor
+            safeAdm,
             update.bolgeId || null,
             update.engelli || 0,
             update.id
@@ -348,7 +364,7 @@ function handleSaveChanges(req, res, body) {
               update.kus || 0,
               update.kedi || 0,
               update.kopek || 0,
-              safeAdm,      // adm her zaman DB'den okunana eşitleniyor
+              safeAdm,
               update.bolgeId || null,
               update.engelli || 0,
               update.id
@@ -368,7 +384,6 @@ function handleSaveChanges(req, res, body) {
     for (const insert of inserts) {
       await new Promise((resolve) => {
         const hash = bcrypt.hashSync(insert.sifre || "12345", 10);
-        // ADM KURALI: Yeni eklenen kayıtlarda adm her zaman 0'dır. API üzerinden adm verilemez.
         const query = "INSERT INTO yonTablo (isim, sifre, telefon, mail, kus, kedi, kopek, adm, bolgeId, engelli) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         const params = [
           insert.isim,
@@ -378,7 +393,7 @@ function handleSaveChanges(req, res, body) {
           insert.kus || 0,
           insert.kedi || 0,
           insert.kopek || 0,
-          0,              // adm her zaman 0 — API'den adm verilemez, doğrudan DB'den verilir
+          0,
           insert.bolgeId || null,
           insert.engelli || 0
         ];
@@ -430,7 +445,7 @@ function handleCreateIlan(req, res, body) {
           JSON.stringify({ 
             message: "İlan başarıyla oluşturuldu.", 
             id: this.lastID,
-            subCode: 200301, // İlan onaya gönderildi
+            subCode: 200301
           })
         );
       }
@@ -459,7 +474,7 @@ function handleTalipOl(req, res, ilanId, body) {
         res.writeHead(201, { "Content-Type": "application/json" }).end(
           JSON.stringify({ 
             message: "Başvurunuz başarıyla alındı.",
-            subCode: 200302 // Başvurunuz alındı
+            subCode: 200302
           })
         );
       });
@@ -642,15 +657,16 @@ function handleGetIlanlar(req, res, params) {
   });
 }
 
-function handleSmsRequest(req, res, parsedBody, rawBody) {
-  // Basit bir stub: SMS_SECRET_KEY kontrolü ve bakiye ekleme.
+function handleSmsRequest(req, res, parsedBody, rawBody, clientIp) {
   const authHeader = req.headers['x-secret-key'];
   if (authHeader !== SMS_SECRET_KEY) {
+    addPenaltyPoint(clientIp, 35);
     return sendError(res, 403, 1300, 130001, "Geçersiz SMS anahtarı.");
   }
 
   const { telefon, miktar } = parsedBody;
   if (!telefon || !miktar) {
+    addPenaltyPoint(clientIp, 25);
     return sendError(res, 400, 1300, 130002, "Telefon ve miktar zorunludur.");
   }
 
@@ -667,14 +683,13 @@ function handleSmsRequest(req, res, parsedBody, rawBody) {
 
 
 
-// --- BOLGE APP HANDLERS (Corrected and Completed) ---
+// --- BOLGE APP HANDLERS ---
 
 function handleGetBolgeIlanlar(req, res, params) {
   const user = req.user;
   let whereClauses = ["i.bolgeId = ?"];
   let queryParams = [user.bolgeId];
 
-  // Yöneticinin yetkili olduğu türler (kus, kedi, kopek)
   const allowedTurler = [];
   if (user.kedi === 1) allowedTurler.push('kedi');
   if (user.kopek === 1) allowedTurler.push('köpek', 'kopek');
@@ -688,9 +703,6 @@ function handleGetBolgeIlanlar(req, res, params) {
     }
   }
 
-  // TÜR FİLTRESİ VE SERVER-SIDE OTOMATİK DÜZELTME:
-  // Kural: Eğer yönetici adm ise VEYA henüz tür yetkilendirmesi yapılmamışsa (allowedTurler boşsa), tüm türleri görebilir.
-  // Eğer yöneticiye spesifik tür izinleri tanımlanmışsa (allowedTurler doluysa), yalnızca yetkili olduğu türler gelir.
   const isGenelYonetici = user.adm === 1 || allowedTurler.length === 0;
 
   if (params.has("tur") && params.get("tur")) {
@@ -698,10 +710,8 @@ function handleGetBolgeIlanlar(req, res, params) {
     
     let effectiveTurler;
     if (isGenelYonetici) {
-      // Genel yönetici istediği türü filtreleyebilir
       effectiveTurler = requestedTurler;
     } else {
-      // Spesifik yönetici yalnızca yetkili olduğu türleri filtreleyebilir (otomatik düzeltme)
       effectiveTurler = requestedTurler.filter(t => 
         allowedTurler.includes(t) || 
         (t === 'kopek' && allowedTurler.includes('köpek')) ||
@@ -723,9 +733,7 @@ function handleGetBolgeIlanlar(req, res, params) {
       whereClauses.push("1 = 0");
     }
   } else {
-    // Yönetici tür filtresi seçmediğinde:
     if (!isGenelYonetici) {
-      // Spesifik tür yetkilisi ise otomatik düzeltmeyle yalnızca yetkili olduğu türleri getir
       const finalTurList = [];
       allowedTurler.forEach(t => {
         if (t === 'kedi') finalTurList.push('kedi');
@@ -736,7 +744,6 @@ function handleGetBolgeIlanlar(req, res, params) {
       whereClauses.push(`i.hayvanTuru IN (${uniqueTurList.map(() => '?').join(',')})`);
       queryParams.push(...uniqueTurList);
     }
-    // isGenelYonetici ise hiçbir tür kısıtı eklenmez, bölgedeki tüm ilanlar döner!
   }
 
   const limit = parseInt(params.get("limit") || "50", 10);
@@ -890,19 +897,24 @@ function handleGetBolgeMesajlar(req, res) {
 
 
 // --- AUTHENTICATION MIDDLEWARE ---
-function authenticate(req, res, next) {
+function authenticate(req, res, clientIp, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (token == null) return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  if (token == null) {
+    addPenaltyPoint(clientIp, 35);
+    return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
+      addPenaltyPoint(clientIp, 35);
       if (err.name === 'TokenExpiredError') {
         return sendError(res, 419, 1001, 100101, "Oturum süreniz dolmuştur. Lütfen tekrar giriş yapın.");
       }
       return sendError(res, 403, 1000, 100002, "Geçersiz token.");
     }
     if (user.adm !== 1) {
+      addPenaltyPoint(clientIp, 35);
       return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
     }
     req.user = user;
@@ -910,13 +922,17 @@ function authenticate(req, res, next) {
   });
 }
 
-function authenticatePublic(req, res, next) {
+function authenticatePublic(req, res, clientIp, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (token == null) return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  if (token == null) {
+    addPenaltyPoint(clientIp, 35);
+    return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  }
 
   jwt.verify(token, JWT_PUBLIC_SECRET, (err, user) => {
     if (err) {
+      addPenaltyPoint(clientIp, 35);
       if (err.name === 'TokenExpiredError') {
         return sendError(res, 419, 1001, 100101, "Oturum süreniz dolmuştur. Lütfen tekrar giriş yapın.");
       }
@@ -927,13 +943,17 @@ function authenticatePublic(req, res, next) {
   });
 }
 
-function authenticateBolge(req, res, next) {
+function authenticateBolge(req, res, clientIp, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (token == null) return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  if (token == null) {
+    addPenaltyPoint(clientIp, 35);
+    return sendError(res, 401, 1000, 100001, "Bu işlem için token gereklidir.");
+  }
 
   jwt.verify(token, JWT_BOLGE_SECRET, (err, user) => {
     if (err) {
+      addPenaltyPoint(clientIp, 35);
       if (err.name === 'TokenExpiredError') {
         return sendError(res, 419, 1001, 100101, "Oturum süreniz dolmuştur. Lütfen tekrar giriş yapın.");
       }
@@ -948,9 +968,7 @@ function authenticateBolge(req, res, next) {
 
 //--- Admin App - User Management Handlers ---
 
-// Genel kullanıcıları listeler
 function handleGetKullanicilar(req, res) {
-  // Sadece admin yetkisi olanların erişebilmesi için ek bir kontrol
   if (req.user.adm !== 1) {
     return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
   }
@@ -961,9 +979,7 @@ function handleGetKullanicilar(req, res) {
   let query = "SELECT id, isim, telefon, mail, yayinHakki, durum FROM kullaniciTablo";
   const params = [];
 
-  // Filter by 'durum' if provided
   if (durumParams && durumParams.length > 0) {
-    // Ensure params are integers to prevent injection
     const validDurumParams = durumParams.map(p => parseInt(p, 10)).filter(p => !isNaN(p));
     if (validDurumParams.length > 0) {
       const placeholders = validDurumParams.map(() => '?').join(',');
@@ -984,7 +1000,6 @@ function handleGetKullanicilar(req, res) {
   });
 }
 
-// Kullanıcı durumunu günceller
 function handleUpdateKullaniciStatus(req, res, body) {
   if (req.user.adm !== 1) {
     return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
@@ -1026,7 +1041,6 @@ function handleUpdateKullaniciStatus(req, res, body) {
   });
 }
 
-// Yeni bir genel kullanıcı kaydeder (admin tarafından)
 async function handleRegisterKullanici(req, res, body) {
   if (req.user.adm !== 1) {
     return sendError(res, 403, 1201, 120101, "Bu işlemi sadece adminler yapabilir.");
@@ -1061,8 +1075,9 @@ async function handleRegisterKullanici(req, res, body) {
   }
 }
 
-server.listen(3001, () => {
-  console.log("Server running on port 3001");
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
 
 module.exports = server;

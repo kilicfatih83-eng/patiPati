@@ -543,5 +543,27 @@ AŞAĞIDAKİ ADIMLAR, BİZZAT YÜKLEME VE KURULUM AŞAMASINDA NE NEYİ, NEREYE, 
    - Adım 6: Angular frontend projeleri (`public-app`, `admin-app`, `bolge-app`) `npm run build -- --configuration production` ile derlenip `dist/` çıktıları sunucudaki `/var/www/` dizinlerine yüklenir.
    - Adım 7: PM2 servisi başlatılır: `pm2 start server/server.js --name "ekosistem-api"` ve `pm2 save`.
 
+--------------------------------------------------------------------------------
+19-9 YAPILAN KOD DEĞİŞİKLİKLERİ VE KULLANICI REHBERİ (TAMAMLANDI)
+--------------------------------------------------------------------------------
+
+TÜM GELİŞTİRMELER, GÜVENLİK KORUMALARI VE PERFORMANS FİX'LERİ KOD TABANINA İŞLENMİŞTİR:
+
+1. GERÇEKLEŞTİRİLEN KOD VE DOSYA DEĞİŞİKLİKLERİ:
+   [X] `server/package.json`: `dotenv` bağımlılığı projeye eklendi ve kuruldu.
+   [X] `server/security.js`: Event Loop izleme (monitorEventLoopDelay), Fail-Fast (%75 ve %80 yük koruması), RAM ceza puanı yönetimi ve Cloudflare API IP ban modülü sıfırdan oluşturuldu.
+   [X] `server/cf-cleanup.js`: 30 dakikada bir Cloudflare ban listesini tarayıp süresi dolan banları temizleyen script oluşturuldu.
+   [X] `server/.env`: JWT ve Cloudflare API değişkenleri için konfigürasyon dosyası eklendi.
+   [X] `server/database.js`: SQLite WAL modu (`PRAGMA journal_mode = WAL`), `synchronous = NORMAL`, `temp_store = MEMORY`, `mmap_size` (256MB), `cache_size` (64MB), `busyTimeout` (3000ms) ve tüm arama/join indeksleri (`idx_ilan_durum_bolge`, `idx_ilan_tur`, `idx_ilan_kullanici`, `idx_talip_ilan`, `idx_talip_kullanici`, `idx_kullanici_telefon`, `idx_yon_isim`) eklendi.
+   [X] `server/server.js`: `dotenv` ve `security.js` import edildi. Yük kontrolü (`checkServerLoad`), `CF-Connecting-IP` üzerinden gerçek IP tespiti, 400 bad JSON (25 puan), 404 endpoint (50 puan), 401/403 yetkisiz erişim (35 puan) ceza skorları entegre edildi. JWT gizli anahtarları `.env` değişkenlerine bağlandı.
+
+2. KULLANICININ YÜKLEME VE CANLIYA ALMA AŞAMASINDA YAPACAĞI İŞLEMLER:
+   - Adım 1: `server/.env` dosyasındaki `CF_ZONE_ID` ve `CF_API_TOKEN` değişkenlerini kendi Cloudflare API panelinizden alacağınız anahtarlarla güncelleyin.
+   - Adım 2: GCP Firewall ekranınızda (VPC Network -> Firewall) 80 ve 443 portlarını sadece Cloudflare IP bloklarına izin verecek şekilde sınırlayın.
+   - Adım 3: DuckDNS veya Cloudflare paneli üzerinden geçici domaininizi (örn: `projeniz.duckdns.org`) sunucu IP adresinize yönlendirin ve Turuncu Bulut (Proxy) modunu açın.
+   - Adım 4: Nginx dosyanıza (`/etc/nginx/sites-available/default`) yolaHazır.txt dosyasında verilen Nginx konfigürasyonunu ekleyip `sudo systemctl reload nginx` yapın.
+   - Adım 5: Sunucunuzda PM2 ile backend'i çalıştırın: `pm2 start server/server.js --name "ekosistem-api"` ve `pm2 save`.
+   - Adım 6: Ban temizleme script'i için crontab kaydı ekleyin: `*/30 * * * * /usr/bin/node /path/to/server/cf-cleanup.js`.
+
 ================================================================================
 ================================================================================
